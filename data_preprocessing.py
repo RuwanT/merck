@@ -11,6 +11,8 @@ convert the merck data-set suitable to be fead to the CNN
 
 import pandas as pd
 import numpy as np
+from nutsflow import *
+from nutsml import *
 
 data_root = '/home/truwan/DATA/merck/'
 save_root = '/home/truwan/DATA/merck/preprocessed/'
@@ -18,6 +20,7 @@ save_root = '/home/truwan/DATA/merck/preprocessed/'
 
 dataset_names = ['3A4', 'CB1', 'DPP4', 'HIVINT', 'HIVPROT', 'LOGD', 'METAB', 'NK1', 'OX1', 'OX2', 'PGP', 'PPB', 'RAT_F', 'TDI', 'THROMBIN']
 
+stat_hold = list() # hold the mean and standard deviation for each data-set
 
 for dataset_name in dataset_names:
 
@@ -56,6 +59,8 @@ for dataset_name in dataset_names:
     x_mean = np.mean(X)
     x_std = np.std(X)
 
+    stat_hold.append((dataset_name, x_mean, x_std))
+
     train.Act = (train.Act - x_mean) / x_std
     test.Act = (test.Act - x_mean) / x_std
 
@@ -72,3 +77,6 @@ for dataset_name in dataset_names:
     test.to_csv(test_filename_save)
 
     print 'Done dataset ', dataset_name
+
+writer = WriteCSV(save_root + 'dataset_stats.csv')
+stat_hold >> writer
