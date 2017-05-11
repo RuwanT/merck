@@ -5,16 +5,18 @@ from custom_networks import deep_net
 from custom_metric import Rsqured
 import numpy as np
 import pandas as pd
+from keras.optimizers import Adam
 
 # Global variables
-BATCH_SIZE = 128
+BATCH_SIZE = 64
 EPOCH = 200
 
 data_root = '/home/truwan/DATA/merck/preprocessed/'
-dataset_names = ['3A4', 'CB1', 'DPP4', 'HIVINT', 'HIVPROT', 'LOGD', 'METAB', 'NK1', 'OX1', 'OX2', 'PGP', 'PPB', 'RAT_F',
-                 'TDI', 'THROMBIN']
+dataset_names = ['CB1', 'DPP4', 'HIVINT', 'HIVPROT', 'METAB', 'NK1', 'OX1', 'PGP', 'PPB', 'RAT_F',
+                 'TDI', 'THROMBIN', 'OX2', '3A4', 'LOGD']
 
 dataset_stats = pd.read_csv(data_root + 'dataset_stats.csv', header=None, names=['mean', 'std'], index_col=0)
+
 
 def Rsqured_np(x, y):
     """
@@ -44,26 +46,26 @@ def RMSE_np(x, y):
     :param y: predicted values
     :return: RMSE error
     """
-
-    # TODO : test the code
     x = np.asarray(x, dtype=float)
     y = np.asarray(y, dtype=float)
 
+    print x.shape, y.shape
     n = x.shape[0]
 
-    return np.sqrt(np.sum(np.square(x - y) / n))
+    return np.sqrt(np.sum(np.square(x - y)) / n)
 
 
 if __name__ == "__main__":
     for dataset_name in dataset_names:
         test_stat_hold = list()
+        best_RMSE = float("inf")
 
         print 'Training on Data-set: ' + dataset_name
         test_file = data_root + dataset_name + '_test_disguised.csv'
         train_file = data_root + dataset_name + '_training_disguised.csv'
 
         data_train = ReadPandas(train_file, dropnan=True)
-        data_test = ReadPandas(train_file, dropnan=True)
+        data_test = ReadPandas(test_file, dropnan=True)
         feature_dim = data_train.dataframe.shape[1] - 3
 
 
@@ -83,7 +85,9 @@ if __name__ == "__main__":
                        .by(1, 'number', float))
 
         model = deep_net(input_shape=feature_dim)
-        model.compile(optimizer='sgd', loss='mean_squared_error', metrics=[Rsqured])
+
+        opti = Adam(lr=0.0001, beta_1=0.5)
+        model.compile(optimizer=opti, loss='mean_squared_error', metrics=[Rsqured])
 
 
         def train_network_batch(sample):
@@ -120,6 +124,9 @@ if __name__ == "__main__":
                 print 'Dataset ' + dataset_name + ' Epoch ' + str(e), ' : RMSE = ' + str(
                     RMSE_e) + ', R-Squared = ' + str(Rsquared_e)
                 test_stat_hold.append(('Epoch ' + str(e), RMSE_e, Rsquared_e))
+
+                if RMSE_e < best_RMSE:
+                    model.save_weights('./outputs/weights_' + dataset_name + '.h5')
 
         print "Calculating final R2 error ..."
 
