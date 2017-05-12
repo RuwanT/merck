@@ -5,9 +5,9 @@ convert the merck data-set suitable to be fead to the CNN
 2) normalize the activation to have zero mean and 1 std (z-score)
 3) rescale the features to 0-1 by dividing each column by its training max
 
-# TODO: check for features that are not categorical
-
 """
+
+# TODO: remove saving of the index in write_pandas and run code
 
 import pandas as pd
 import numpy as np

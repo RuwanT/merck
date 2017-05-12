@@ -1,17 +1,22 @@
 from nutsflow import *
 from nutsml import *
 import matplotlib.pyplot as plt
-from custom_networks import deep_net
+from custom_networks import deep_net, merck_net
 from custom_metric import Rsqured
 import numpy as np
 import pandas as pd
-from keras.optimizers import Adam
+from keras.optimizers import Adam, sgd
+import sys
+
+#TODO: check setup validation set from train data
 
 # Global variables
 BATCH_SIZE = 64
 EPOCH = 200
+NET_ARCH = 'merck_net'
 
 data_root = '/home/truwan/DATA/merck/preprocessed/'
+
 dataset_names = ['CB1', 'DPP4', 'HIVINT', 'HIVPROT', 'METAB', 'NK1', 'OX1', 'PGP', 'PPB', 'RAT_F',
                  'TDI', 'THROMBIN', 'OX2', '3A4', 'LOGD']
 
@@ -65,6 +70,8 @@ if __name__ == "__main__":
         train_file = data_root + dataset_name + '_training_disguised.csv'
 
         data_train = ReadPandas(train_file, dropnan=True)
+        # split randomly train and val
+        data_train, data_val = data_train >> SplitRandom(ratio=0.8) >> Collect()
         data_test = ReadPandas(test_file, dropnan=True)
         feature_dim = data_train.dataframe.shape[1] - 3
 
@@ -79,16 +86,21 @@ if __name__ == "__main__":
             features = list(sample[3:])
             return (features, y)
 
-
+        SplitRandom()
         build_batch = (BuildBatch(BATCH_SIZE)
                        .by(0, 'vector', float)
                        .by(1, 'number', float))
 
-        model = deep_net(input_shape=feature_dim)
+        if NET_ARCH == 'deep_net':
+            model = deep_net(input_shape=(feature_dim,))
+            opti = Adam(lr=0.0001, beta_1=0.5)
+        elif NET_ARCH == 'merck_net':
+            model = merck_net(input_shape=(feature_dim,))
+            opti = sgd(lr=0.05, momentum=0.9)
+        else:
+            sys.exit("Network not defined correctly, check NET_ARCH. ")
 
-        opti = Adam(lr=0.0001, beta_1=0.5)
         model.compile(optimizer=opti, loss='mean_squared_error', metrics=[Rsqured])
-
 
         def train_network_batch(sample):
             tloss = model.train_on_batch(sample[0], sample[1])
@@ -103,7 +115,6 @@ if __name__ == "__main__":
         def predict_network_batch(sample):
             return model.predict(sample[0])
 
-
         scale_activators = lambda x: (
             x[0] * dataset_stats.loc[dataset_name, 'std'] + dataset_stats.loc[dataset_name, 'mean'])
 
@@ -116,7 +127,7 @@ if __name__ == "__main__":
 
             # test the network every 10th iteration
             if int(e) % 10 == 0:
-                preds = data_test >> Map(organize_features) >> build_batch >> Map(
+                preds = data_val >> Map(organize_features) >> build_batch >> Map(
                     predict_network_batch) >> Flatten() >> Map(scale_activators) >> Collect()
 
                 RMSE_e = RMSE_np(preds, trues)
@@ -128,14 +139,15 @@ if __name__ == "__main__":
                 if RMSE_e < best_RMSE:
                     model.save_weights('./outputs/weights_' + dataset_name + '.h5')
 
-        print "Calculating final R2 error ..."
+        print "Calculating errors for test set ..."
+        model.load_weights('./outputs/weights_' + dataset_name + '.h5')
 
         preds = data_test >> Map(organize_features) >> build_batch >> Map(predict_network_batch) >> Flatten() >> Map(
             scale_activators) >> Collect()
 
         RMSE_e = RMSE_np(preds, trues)
         Rsquared_e = Rsqured_np(preds, trues)
-        print 'Dataset ' + dataset_name + ' Final : RMSE = ' + str(RMSE_e) + ', R-Squared = ' + str(Rsquared_e)
+        print 'Dataset ' + dataset_name + ' Test : RMSE = ' + str(RMSE_e) + ', R-Squared = ' + str(Rsquared_e)
         test_stat_hold.append(('Final', RMSE_e, Rsquared_e))
 
         writer = WriteCSV('./outputs/test_errors_' + dataset_name + '.csv')
