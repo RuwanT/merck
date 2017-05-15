@@ -8,7 +8,6 @@ import pandas as pd
 from keras.optimizers import Adam, sgd
 import sys
 
-#TODO: check setup validation set from train data
 
 # Global variables
 BATCH_SIZE = 64
@@ -54,7 +53,6 @@ def RMSE_np(x, y):
     x = np.asarray(x, dtype=float)
     y = np.asarray(y, dtype=float)
 
-    print x.shape, y.shape
     n = x.shape[0]
 
     return np.sqrt(np.sum(np.square(x - y)) / n)
@@ -70,10 +68,10 @@ if __name__ == "__main__":
         train_file = data_root + dataset_name + '_training_disguised.csv'
 
         data_train = ReadPandas(train_file, dropnan=True)
+        feature_dim = data_train.dataframe.shape[1] - 3
         # split randomly train and val
         data_train, data_val = data_train >> SplitRandom(ratio=0.8) >> Collect()
         data_test = ReadPandas(test_file, dropnan=True)
-        feature_dim = data_train.dataframe.shape[1] - 3
 
 
         def organize_features(sample):
@@ -106,11 +104,9 @@ if __name__ == "__main__":
             tloss = model.train_on_batch(sample[0], sample[1])
             return (tloss[0], tloss[1])
 
-
         def test_network_batch(sample):
             tloss = model.test_on_batch(sample[0], sample[1])
             return (tloss[0],)
-
 
         def predict_network_batch(sample):
             return model.predict(sample[0])
@@ -118,7 +114,7 @@ if __name__ == "__main__":
         scale_activators = lambda x: (
             x[0] * dataset_stats.loc[dataset_name, 'std'] + dataset_stats.loc[dataset_name, 'mean'])
 
-        trues = data_test >> GetCols(2) >> Map(scale_activators) >> Collect()
+        trues = data_val >> GetCols(2) >> Map(scale_activators) >> Collect()
 
         for e in range(1, EPOCH + 1):
             # training the network
@@ -138,9 +134,11 @@ if __name__ == "__main__":
 
                 if RMSE_e < best_RMSE:
                     model.save_weights('./outputs/weights_' + dataset_name + '.h5')
+                    best_RMSE = RMSE_e
 
         print "Calculating errors for test set ..."
         model.load_weights('./outputs/weights_' + dataset_name + '.h5')
+        trues = data_test >> GetCols(2) >> Map(scale_activators) >> Collect()
 
         preds = data_test >> Map(organize_features) >> build_batch >> Map(predict_network_batch) >> Flatten() >> Map(
             scale_activators) >> Collect()
