@@ -31,9 +31,11 @@ The packages needed are listed in the `requirements.txt`
 * `python main.py`
 
 
-##Results
+## Results
 
-| Dataset  | merk paper | This implementation |
+The Standered Error of Prediction (SEP) on the test set
+
+| Dataset  | [merk paper](http://www.cs.toronto.edu/~gdahl/papers/deepQSARJChemInfModel2015.pdf) | This implementation |
 |----------|------------|---------------------|
 | 3A4      | 0.48       | 0.50                |
 | CB1      | 1.25       | 1.21                |
