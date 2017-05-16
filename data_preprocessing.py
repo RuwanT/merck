@@ -3,19 +3,19 @@ convert the merck data-set suitable to be fead to the CNN
 
 1) remove columns that does not appear in both training and test
 2) normalize the activation to have zero mean and 1 std (z-score)
-3) rescale the features to 0-1 by dividing each column by its training max
+3) rescale the features to 0-1 by dividing each column by its training max or y = log(x+1)
 
 """
-
-# TODO: remove saving of the index in write_pandas and run code
 
 import pandas as pd
 import numpy as np
 from nutsflow import *
 from nutsml import *
+import sys
 
 data_root = '/home/truwan/DATA/merck/'
 save_root = '/home/truwan/DATA/merck/preprocessed/'
+FEATURE_SCALE = 'log'   # 'uniform'
 
 
 dataset_names = ['3A4', 'CB1', 'DPP4', 'HIVINT', 'HIVPROT', 'LOGD', 'METAB', 'NK1', 'OX1', 'OX2', 'PGP', 'PPB', 'RAT_F', 'TDI', 'THROMBIN']
@@ -65,16 +65,20 @@ for dataset_name in dataset_names:
     test.Act = (test.Act - x_mean) / x_std
 
     # rescale features
-    max_feature = train.max(axis=0)[2:]
+    if FEATURE_SCALE == 'log':
+        train.ix[:, 2:] = np.log(train.ix[:, 2:] + 1)
+        test.ix[:, 2:] = np.log(test.ix[:, 2:] + 1)
 
-    train.ix[:, 2:] = train.ix[:, 2:] / max_feature
-    test.ix[:, 2:] = test.ix[:, 2:] / max_feature
-
-    # print train.max(axis=0)
+    elif FEATURE_SCALE == 'uniform':
+        max_feature = train.max(axis=0)[2:]
+        train.ix[:, 2:] = train.ix[:, 2:] / max_feature
+        test.ix[:, 2:] = test.ix[:, 2:] / max_feature
+    else:
+        sys.exit("Feature normalization method not defined correctly, check FEATURE_SCALE. ")
 
     # save data to csv
-    train.to_csv(train_filename_save)
-    test.to_csv(test_filename_save)
+    train.to_csv(train_filename_save, index=False)
+    test.to_csv(test_filename_save, index=False)
 
     print 'Done dataset ', dataset_name
 
