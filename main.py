@@ -12,6 +12,7 @@ import sys
 # Global variables
 BATCH_SIZE = 64
 EPOCH = 200
+VAL_FREQ = 5
 NET_ARCH = 'merck_net'
 
 data_root = '/home/truwan/DATA/merck/preprocessed/'
@@ -86,7 +87,6 @@ if __name__ == "__main__":
             features = list(sample[Act_inx+1:])
             return (features, y)
 
-        SplitRandom()
         build_batch = (BuildBatch(BATCH_SIZE)
                        .by(0, 'vector', float)
                        .by(1, 'number', float))
@@ -96,7 +96,7 @@ if __name__ == "__main__":
             opti = Adam(lr=0.0001, beta_1=0.5)
         elif NET_ARCH == 'merck_net':
             model = merck_net(input_shape=(feature_dim,))
-            opti = sgd(lr=0.05, momentum=0.9)
+            opti = sgd(lr=0.05, momentum=0.9, clipnorm=1.0)
         else:
             sys.exit("Network not defined correctly, check NET_ARCH. ")
 
@@ -117,14 +117,13 @@ if __name__ == "__main__":
             x[0] * dataset_stats.loc[dataset_name, 'std'] + dataset_stats.loc[dataset_name, 'mean'])
 
         trues = data_val >> GetCols(Act_inx) >> Map(scale_activators) >> Collect()
-
         for e in range(1, EPOCH + 1):
             # training the network
-            data_train >> Shuffle(1000) >> Map(organize_features) >> build_batch >> Map(
+            data_train >> Shuffle(1000) >> Map(organize_features) >> NOP(PrintColType()) >> build_batch >> Map(
                 train_network_batch) >> NOP(Print()) >> Consume()
 
-            # test the network every 10th iteration
-            if int(e) % 10 == 0:
+            # test the network every VAL_FREQ iteration
+            if int(e) % VAL_FREQ == 0:
                 preds = data_val >> Map(organize_features) >> build_batch >> Map(
                     predict_network_batch) >> Flatten() >> Map(scale_activators) >> Collect()
 
