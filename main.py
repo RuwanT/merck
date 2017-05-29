@@ -11,7 +11,7 @@ import sys
 
 # Global variables
 BATCH_SIZE = 64
-EPOCH = 200
+EPOCH = 20
 VAL_FREQ = 5
 NET_ARCH = 'merck_net'
 
@@ -19,6 +19,7 @@ data_root = '/home/truwan/DATA/merck/preprocessed/'
 
 dataset_names = ['CB1', 'DPP4', 'HIVINT', 'HIVPROT', 'METAB', 'NK1', 'OX1', 'PGP', 'PPB', 'RAT_F',
                  'TDI', 'THROMBIN', 'OX2', '3A4', 'LOGD']
+dataset_names = ['CB1', 'DPP4']
 
 dataset_stats = pd.read_csv(data_root + 'dataset_stats.csv', header=None, names=['mean', 'std'], index_col=0)
 
