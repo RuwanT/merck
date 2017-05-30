@@ -8,6 +8,7 @@ import pandas as pd
 from keras.optimizers import Adam, sgd
 import sys
 from netevolve import evolve
+from keras.models import model_from_json
 
 # Global variables
 BATCH_SIZE = 64
@@ -81,6 +82,19 @@ def RMSE_np(x, y):
     return np.sqrt(np.sum(np.square(x - y)) / n)
 
 
+def count_trainable_weights(model):
+    num_weights = 0
+    for layer in model.layers:
+        if 'dense' in layer.name:
+            weights = layer.get_weights()
+            num_weights += weights[0].shape[0]*weights[0].shape[1]
+            num_weights += weights[1].shape[0]
+
+            num_weights -= np.sum(np.isclose(weights[0], np.zeros(weights[0].shape, dtype=np.float32), atol=1e-10, rtol=1e-10)).astype(np.int8)
+
+    return num_weights
+
+
 if __name__ == "__main__":
     for dataset_name in dataset_names:
         test_stat_hold = list()
@@ -136,31 +150,13 @@ if __name__ == "__main__":
             x[0] * dataset_stats.loc[dataset_name, 'std'] + dataset_stats.loc[dataset_name, 'mean'])
 
         for gen in range(1, MAX_GENERATIONS):
-            trues = data_val >> GetCols(Act_inx) >> Map(scale_activators) >> Collect()
-            best_RMSE = float("inf")
-            print 'Training dataset ' + dataset_name + ', generation: ' + str(gen)
-            for e in range(1, EPOCH + 1):
-                # training the network
-                data_train >> Shuffle(1000) >> Map(organize_features) >> NOP(PrintColType()) >> build_batch >> Map(
-                    train_network_batch) >> NOP(Print()) >> Consume()
-
-                # test the network every VAL_FREQ iteration
-                if int(e) % VAL_FREQ == 0:
-                    preds = data_val >> Map(organize_features) >> build_batch >> Map(
-                        predict_network_batch) >> Flatten() >> Map(scale_activators) >> Collect()
-
-                    RMSE_e = RMSE_np(preds, trues)
-                    Rsquared_e = Rsqured_np(preds, trues)
-
-                    if RMSE_e < best_RMSE:
-                        model_json = model.to_json()
-                        with open('./outputs/model_' + dataset_name + '_' + str(gen) + '.json', "w") as json_file:
-                            json_file.write(model_json)
-                        model.save_weights('./outputs/weights_' + dataset_name + '_' + str(gen) + '.h5')
-                        best_RMSE = RMSE_e
-
             print "Calculating errors for test set ..."
+            json_file = open('./outputs/model_' + dataset_name + '_' + str(gen) + '.json', 'r')
+            loaded_model_json = json_file.read()
+            json_file.close()
+            loaded_model = model_from_json(loaded_model_json)
             model.load_weights('./outputs/weights_' + dataset_name + '_' + str(gen) + '.h5')
+
             trues = data_test >> GetCols(Act_inx) >> Map(scale_activators) >> Collect()
 
             preds = data_test >> Map(organize_features) >> build_batch >> Map(
@@ -169,15 +165,12 @@ if __name__ == "__main__":
 
             RMSE_e = RMSE_np(preds, trues)
             Rsquared_e = Rsqured_np(preds, trues)
-            print 'Dataset ' + dataset_name + ', Gen ' + str(gen) + ' Test : RMSE = ' + str(
-                RMSE_e) + ', R-Squared = ' + str(Rsquared_e)
-            test_stat_hold.append(('Gen_' + str(gen), RMSE_e, Rsquared_e))
 
-            # Evolve network
-            weight_mask, hidden_shape = evolve.sample_weight_mask(model, weight_mask)
-            model = initialize_model(feature_dim=feature_dim, H_shape=hidden_shape)
-            model.summary()
-            model = evolve.evolve_network(model, weight_mask)
+            num_trainable_weights = count_trainable_weights(model)
+
+            print 'Dataset ' + dataset_name + ', Gen ' + str(gen) + ' Test : RMSE = ' + str(
+                RMSE_e) + ', R-Squared = ' + str(Rsquared_e) + ', num trainiale weights = ' + str(num_trainable_weights)
+            test_stat_hold.append(('Gen_' + str(gen), RMSE_e, Rsquared_e, num_trainable_weights))
 
         writer = WriteCSV('./outputs/test_errors_' + dataset_name + '.csv')
         test_stat_hold >> writer

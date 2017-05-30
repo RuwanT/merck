@@ -6,7 +6,7 @@ re-implementation of the paper (the recommended model):
 `Ma, J., Sheridan, R.P., Liaw, A., Dahl, G.E. and Svetnik, V., 2015. Deep neural nets as a method for quantitative structure–activity relationships. Journal of chemical information and modeling, 55(2), pp.263-274.`
 
 ## Installation
-The code was tested in _Keras_ with _Tensorflow_ backend. 
+The code was tested in _Keras_ with _Tensorflow_ backend on a _Ubuntu_ server. 
 The packages needed are listed in the `requirements.txt`
 
 ### Installing python virtual environment and requirements
@@ -33,7 +33,7 @@ The packages needed are listed in the `requirements.txt`
 
 ## Results
 
-The Standard Error of Prediction (SEP) on the test set
+The Standard Error of Prediction (SEP) on the test set (only one run - no averaging).
 
 | Dataset  | [merk paper](http://www.cs.toronto.edu/~gdahl/papers/deepQSARJChemInfModel2015.pdf) | This implementation |
 |----------|:------------:|:---------------------:|
