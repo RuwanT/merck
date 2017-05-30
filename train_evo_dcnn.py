@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 from keras.optimizers import Adam, sgd
 import sys
+from netevolve import evolve
 
 
 # Global variables
@@ -14,6 +15,7 @@ BATCH_SIZE = 64
 EPOCH = 200
 VAL_FREQ = 5
 NET_ARCH = 'merck_net'
+MAX_GENERATIONS = 10
 
 data_root = '/home/truwan/DATA/merck/preprocessed/'
 
@@ -21,6 +23,26 @@ dataset_names = ['CB1', 'DPP4', 'HIVINT', 'HIVPROT', 'METAB', 'NK1', 'OX1', 'PGP
                  'TDI', 'THROMBIN', 'OX2', '3A4', 'LOGD']
 
 dataset_stats = pd.read_csv(data_root + 'dataset_stats.csv', header=None, names=['mean', 'std'], index_col=0)
+
+
+def initialize_model(feature_dim, H_shape):
+    """
+    
+    :param feature_dim: dimension of the input features
+    :return: model with weights initialized by default weight initializer (glotnormal)
+    """
+    if NET_ARCH == 'deep_net':
+        model = deep_net(input_shape=(feature_dim,))
+        opti = Adam(lr=0.0001, beta_1=0.5)
+    elif NET_ARCH == 'merck_net':
+        model = merck_net(input_shape=(feature_dim,), hidden_shape=H_shape)
+        opti = sgd(lr=0.05, momentum=0.9, clipnorm=1.0)
+    else:
+        sys.exit("Network not defined correctly, check NET_ARCH. ")
+
+    model.compile(optimizer=opti, loss='mean_squared_error', metrics=[Rsqured])
+
+    return model
 
 
 def Rsqured_np(x, y):
@@ -91,16 +113,8 @@ if __name__ == "__main__":
                        .by(0, 'vector', float)
                        .by(1, 'number', float))
 
-        if NET_ARCH == 'deep_net':
-            model = deep_net(input_shape=(feature_dim,))
-            opti = Adam(lr=0.0001, beta_1=0.5)
-        elif NET_ARCH == 'merck_net':
-            model = merck_net(input_shape=(feature_dim,))
-            opti = sgd(lr=0.05, momentum=0.9, clipnorm=1.0)
-        else:
-            sys.exit("Network not defined correctly, check NET_ARCH. ")
-
-        model.compile(optimizer=opti, loss='mean_squared_error', metrics=[Rsqured])
+        model = initialize_model(feature_dim=feature_dim, H_shape={'dense_1': 4000, 'dense_2': 2000, 'dense_3': 1000, 'dense_4': 1000})
+        weight_mask = evolve.init_weight_mask(model)
 
         def train_network_batch(sample):
             tloss = model.train_on_batch(sample[0], sample[1])
@@ -117,37 +131,44 @@ if __name__ == "__main__":
             x[0] * dataset_stats.loc[dataset_name, 'std'] + dataset_stats.loc[dataset_name, 'mean'])
 
         trues = data_val >> GetCols(Act_inx) >> Map(scale_activators) >> Collect()
-        for e in range(1, EPOCH + 1):
-            # training the network
-            data_train >> Shuffle(1000) >> Map(organize_features) >> NOP(PrintColType()) >> build_batch >> Map(
-                train_network_batch) >> NOP(Print()) >> Consume()
+        for gen in range(1, MAX_GENERATIONS):
+            print 'Training dataset ' + dataset_name + ', generation: ' + str(gen)
+            for e in range(1, EPOCH + 1):
+                # training the network
+                data_train >> Shuffle(1000) >> Map(organize_features) >> NOP(PrintColType()) >> build_batch >> Map(
+                    train_network_batch) >> NOP(Print()) >> Consume()
 
-            # test the network every VAL_FREQ iteration
-            if int(e) % VAL_FREQ == 0:
-                preds = data_val >> Map(organize_features) >> build_batch >> Map(
-                    predict_network_batch) >> Flatten() >> Map(scale_activators) >> Collect()
+                # test the network every VAL_FREQ iteration
+                if int(e) % VAL_FREQ == 0:
+                    preds = data_val >> Map(organize_features) >> build_batch >> Map(
+                        predict_network_batch) >> Flatten() >> Map(scale_activators) >> Collect()
 
-                RMSE_e = RMSE_np(preds, trues)
-                Rsquared_e = Rsqured_np(preds, trues)
-                print 'Dataset ' + dataset_name + ' Epoch ' + str(e), ' : RMSE = ' + str(
-                    RMSE_e) + ', R-Squared = ' + str(Rsquared_e)
-                test_stat_hold.append(('Epoch ' + str(e), RMSE_e, Rsquared_e))
+                    RMSE_e = RMSE_np(preds, trues)
+                    Rsquared_e = Rsqured_np(preds, trues)
+                    # print 'Dataset ' + dataset_name + ' Epoch ' + str(e), ' : RMSE = ' + str(
+                    #     RMSE_e) + ', R-Squared = ' + str(Rsquared_e)
+                    # test_stat_hold.append(('Epoch ' + str(e), RMSE_e, Rsquared_e))
 
-                if RMSE_e < best_RMSE:
-                    model.save_weights('./outputs/weights_' + dataset_name + '.h5')
-                    best_RMSE = RMSE_e
+                    if RMSE_e < best_RMSE:
+                        model.save_weights('./outputs/weights_' + dataset_name + '_' + str(gen) + '.h5')
+                        best_RMSE = RMSE_e
 
-        print "Calculating errors for test set ..."
-        model.load_weights('./outputs/weights_' + dataset_name + '.h5')
-        trues = data_test >> GetCols(Act_inx) >> Map(scale_activators) >> Collect()
+            print "Calculating errors for test set ..."
+            model.load_weights('./outputs/weights_' + dataset_name + '_' + str(gen) + '.h5')
+            trues = data_test >> GetCols(Act_inx) >> Map(scale_activators) >> Collect()
 
-        preds = data_test >> Map(organize_features) >> build_batch >> Map(predict_network_batch) >> Flatten() >> Map(
-            scale_activators) >> Collect()
+            preds = data_test >> Map(organize_features) >> build_batch >> Map(predict_network_batch) >> Flatten() >> Map(
+                scale_activators) >> Collect()
 
-        RMSE_e = RMSE_np(preds, trues)
-        Rsquared_e = Rsqured_np(preds, trues)
-        print 'Dataset ' + dataset_name + ' Test : RMSE = ' + str(RMSE_e) + ', R-Squared = ' + str(Rsquared_e)
-        test_stat_hold.append(('Final', RMSE_e, Rsquared_e))
+            RMSE_e = RMSE_np(preds, trues)
+            Rsquared_e = Rsqured_np(preds, trues)
+            print 'Dataset ' + dataset_name + 'Gen ' + str(gen) + ' Test : RMSE = ' + str(RMSE_e) + ', R-Squared = ' + str(Rsquared_e)
+            test_stat_hold.append(('Gen_' + str(gen) , RMSE_e, Rsquared_e))
+
+            # Evolve network
+            weight_mask, hidden_shape = evolve.sample_weight_mask(model, weight_mask)
+            model = initialize_model(feature_dim=feature_dim, H_shape=hidden_shape)
+            model = evolve.evolve_network(model, weight_mask)
 
         writer = WriteCSV('./outputs/test_errors_' + dataset_name + '.csv')
         test_stat_hold >> writer

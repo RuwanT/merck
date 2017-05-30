@@ -47,7 +47,7 @@ def deep_net(input_shape=(128)):
     return model
 
 
-def merck_net(input_shape=(128)):
+def merck_net(input_shape=(128), hidden_shape={'dense_1': 4000, 'dense_2': 2000, 'dense_3': 1000, 'dense_4': 1000}):
     """
     # The recommended network presented in the paper: Junshui Ma et. al., Deep Neural Nets as a Method for Quantitative 
     # Structure Activity Relationships
@@ -68,19 +68,19 @@ def merck_net(input_shape=(128)):
 
     model = models.Sequential()
 
-    model.add(Dense(4000, activation='relu', input_shape=input_shape, kernel_regularizer=l2(0.0001)))
-    model.add(Dropout(0.25))
+    model.add(Dense(hidden_shape['dense_1'], activation='relu', input_shape=input_shape, kernel_regularizer=l2(0.0001), name='dense_1'))
+    model.add(Dropout(0.25, name='drop_1'))
 
-    model.add(Dense(2000, activation='relu', input_shape=input_shape, kernel_regularizer=l2(0.0001)))
-    model.add(Dropout(0.25))
+    model.add(Dense(hidden_shape['dense_2'], activation='relu', input_shape=input_shape, kernel_regularizer=l2(0.0001), name='dense_2'))
+    model.add(Dropout(0.25, name='drop_2'))
 
-    model.add(Dense(1000, activation='relu', input_shape=input_shape, kernel_regularizer=l2(0.0001)))
-    model.add(Dropout(0.25))
+    model.add(Dense(hidden_shape['dense_3'], activation='relu', input_shape=input_shape, kernel_regularizer=l2(0.0001), name='dense_3'))
+    model.add(Dropout(0.25, name='drop_3'))
 
-    model.add(Dense(1000, activation='relu', input_shape=input_shape, kernel_regularizer=l2(0.0001)))
-    model.add(Dropout(0.10))
+    model.add(Dense(hidden_shape['dense_4'], activation='relu', input_shape=input_shape, kernel_regularizer=l2(0.0001), name='dense_4'))
+    model.add(Dropout(0.10, name='drop_4'))
 
-    model.add(Dense(1, activation=None, use_bias=True, kernel_regularizer=l2(0.0001)))
+    model.add(Dense(1, activation=None, use_bias=True, kernel_regularizer=l2(0.0001), name='dense_out'))
 
     # model.summary()
 
