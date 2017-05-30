@@ -9,7 +9,6 @@ from keras.optimizers import Adam, sgd
 import sys
 from netevolve import evolve
 
-
 # Global variables
 BATCH_SIZE = 64
 EPOCH = 200
@@ -84,7 +83,6 @@ def RMSE_np(x, y):
 if __name__ == "__main__":
     for dataset_name in dataset_names:
         test_stat_hold = list()
-        best_RMSE = float("inf")
 
         print 'Training on Data-set: ' + dataset_name
         test_file = data_root + dataset_name + '_test_disguised.csv'
@@ -92,7 +90,7 @@ if __name__ == "__main__":
 
         data_train = ReadPandas(train_file, dropnan=True)
         Act_inx = data_train.dataframe.columns.get_loc('Act')
-        feature_dim = data_train.dataframe.shape[1] - (Act_inx+1)
+        feature_dim = data_train.dataframe.shape[1] - (Act_inx + 1)
 
         # split randomly train and val
         data_train, data_val = data_train >> SplitRandom(ratio=0.8) >> Collect()
@@ -106,32 +104,39 @@ if __name__ == "__main__":
             :return: a tupe consising feature vector and predictor
             """
             y = [sample[Act_inx], ]
-            features = list(sample[Act_inx+1:])
+            features = list(sample[Act_inx + 1:])
             return (features, y)
+
 
         build_batch = (BuildBatch(BATCH_SIZE)
                        .by(0, 'vector', float)
                        .by(1, 'number', float))
 
-        model = initialize_model(feature_dim=feature_dim, H_shape={'dense_1': 4000, 'dense_2': 2000, 'dense_3': 1000, 'dense_4': 1000})
+        model = initialize_model(feature_dim=feature_dim,
+                                 H_shape={'dense_1': 4000, 'dense_2': 2000, 'dense_3': 1000, 'dense_4': 1000})
         weight_mask = evolve.init_weight_mask(model)
+
 
         def train_network_batch(sample):
             tloss = model.train_on_batch(sample[0], sample[1])
             return (tloss[0], tloss[1])
 
+
         def test_network_batch(sample):
             tloss = model.test_on_batch(sample[0], sample[1])
             return (tloss[0],)
 
+
         def predict_network_batch(sample):
             return model.predict(sample[0])
+
 
         scale_activators = lambda x: (
             x[0] * dataset_stats.loc[dataset_name, 'std'] + dataset_stats.loc[dataset_name, 'mean'])
 
-        trues = data_val >> GetCols(Act_inx) >> Map(scale_activators) >> Collect()
         for gen in range(1, MAX_GENERATIONS):
+            trues = data_val >> GetCols(Act_inx) >> Map(scale_activators) >> Collect()
+            best_RMSE = float("inf")
             print 'Training dataset ' + dataset_name + ', generation: ' + str(gen)
             for e in range(1, EPOCH + 1):
                 # training the network
@@ -150,6 +155,9 @@ if __name__ == "__main__":
                     # test_stat_hold.append(('Epoch ' + str(e), RMSE_e, Rsquared_e))
 
                     if RMSE_e < best_RMSE:
+                        model_json = model.to_json()
+                        with open('./outputs/model_' + dataset_name + '_' + str(gen) + '.json', "w") as json_file:
+                            json_file.write(model_json)
                         model.save_weights('./outputs/weights_' + dataset_name + '_' + str(gen) + '.h5')
                         best_RMSE = RMSE_e
 
@@ -157,17 +165,20 @@ if __name__ == "__main__":
             model.load_weights('./outputs/weights_' + dataset_name + '_' + str(gen) + '.h5')
             trues = data_test >> GetCols(Act_inx) >> Map(scale_activators) >> Collect()
 
-            preds = data_test >> Map(organize_features) >> build_batch >> Map(predict_network_batch) >> Flatten() >> Map(
+            preds = data_test >> Map(organize_features) >> build_batch >> Map(
+                predict_network_batch) >> Flatten() >> Map(
                 scale_activators) >> Collect()
 
             RMSE_e = RMSE_np(preds, trues)
             Rsquared_e = Rsqured_np(preds, trues)
-            print 'Dataset ' + dataset_name + 'Gen ' + str(gen) + ' Test : RMSE = ' + str(RMSE_e) + ', R-Squared = ' + str(Rsquared_e)
-            test_stat_hold.append(('Gen_' + str(gen) , RMSE_e, Rsquared_e))
+            print 'Dataset ' + dataset_name + ', Gen ' + str(gen) + ' Test : RMSE = ' + str(
+                RMSE_e) + ', R-Squared = ' + str(Rsquared_e)
+            test_stat_hold.append(('Gen_' + str(gen), RMSE_e, Rsquared_e))
 
             # Evolve network
             weight_mask, hidden_shape = evolve.sample_weight_mask(model, weight_mask)
             model = initialize_model(feature_dim=feature_dim, H_shape=hidden_shape)
+            model.summary()
             model = evolve.evolve_network(model, weight_mask)
 
         writer = WriteCSV('./outputs/test_errors_' + dataset_name + '.csv')
