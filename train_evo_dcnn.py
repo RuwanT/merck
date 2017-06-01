@@ -11,10 +11,11 @@ from netevolve import evolve
 
 # Global variables
 BATCH_SIZE = 64
-EPOCH = 200
+EPOCH = 100
 VAL_FREQ = 5
 NET_ARCH = 'merck_net'
 MAX_GENERATIONS = 10
+N_RUNS = 10
 
 data_root = '/home/truwan/DATA/merck/preprocessed/'
 
@@ -81,6 +82,14 @@ def RMSE_np(x, y):
     return np.sqrt(np.sum(np.square(x - y)) / n)
 
 
+def is_structure_valid(hidden_shape, min_neurones=10):
+    is_valid = True
+    for k, h in hidden_shape.iteritems():
+        if h < min_neurones:
+            is_valid = False
+    return is_valid
+
+
 if __name__ == "__main__":
     for dataset_name in dataset_names:
         test_stat_hold = list()
@@ -135,46 +144,65 @@ if __name__ == "__main__":
         scale_activators = lambda x: (
             x[0] * dataset_stats.loc[dataset_name, 'std'] + dataset_stats.loc[dataset_name, 'mean'])
 
-        for gen in range(1, MAX_GENERATIONS):
-            trues = data_val >> GetCols(Act_inx) >> Map(scale_activators) >> Collect()
-            best_RMSE = float("inf")
-            print 'Training dataset ' + dataset_name + ', generation: ' + str(gen)
-            for e in range(1, EPOCH + 1):
-                # training the network
-                data_train >> Shuffle(1000) >> Map(organize_features) >> NOP(PrintColType()) >> build_batch >> Map(
-                    train_network_batch) >> NOP(Print()) >> Consume()
+        for gen in range(0, MAX_GENERATIONS):
+            best_RMSE_gen = float("inf")
+            for rrun in range(0, N_RUNS):
+                trues = data_val >> GetCols(Act_inx) >> Map(scale_activators) >> Collect()
+                best_RMSE = float("inf")
+                print 'Training dataset ' + dataset_name + ', generation: ' + str(gen)
+                for e in range(1, EPOCH + 1):
+                    # training the network
+                    data_train >> Shuffle(1000) >> Map(organize_features) >> NOP(PrintColType()) >> build_batch >> Map(
+                        train_network_batch) >> NOP(Print()) >> Consume()
 
-                # test the network every VAL_FREQ iteration
-                if int(e) % VAL_FREQ == 0:
-                    preds = data_val >> Map(organize_features) >> build_batch >> Map(
-                        predict_network_batch) >> Flatten() >> Map(scale_activators) >> Collect()
+                    # test the network every VAL_FREQ iteration
+                    if int(e) % VAL_FREQ == 0:
+                        preds = data_val >> Map(organize_features) >> build_batch >> Map(
+                            predict_network_batch) >> Flatten() >> Map(scale_activators) >> Collect()
 
-                    RMSE_e = RMSE_np(preds, trues)
-                    Rsquared_e = Rsqured_np(preds, trues)
+                        RMSE_e = RMSE_np(preds, trues)
+                        # Rsquared_e = Rsqured_np(preds, trues)
 
-                    if RMSE_e < best_RMSE:
-                        model_json = model.to_json()
-                        with open('./outputs/model_' + dataset_name + '_' + str(gen) + '.json', "w") as json_file:
-                            json_file.write(model_json)
-                        model.save_weights('./outputs/weights_' + dataset_name + '_' + str(gen) + '.h5')
-                        best_RMSE = RMSE_e
+                        if RMSE_e < best_RMSE:
+                            model_json = model.to_json()
+                            # with open('./outputs/model_' + dataset_name + '_' + str(gen) + '.json', "w") as json_file:
+                            # json_file.write(model_json)
+                            model.save_weights(
+                                './outputs/weights_' + dataset_name + '_' + str(gen) + '_' + 'temp' + '.h5')
+                            best_RMSE = RMSE_e
 
-            print "Calculating errors for test set ..."
-            model.load_weights('./outputs/weights_' + dataset_name + '_' + str(gen) + '.h5')
-            trues = data_test >> GetCols(Act_inx) >> Map(scale_activators) >> Collect()
+                # loading the model based on best validation error
+                model.load_weights('./outputs/weights_' + dataset_name + '_' + str(gen) + '_' + 'temp' + '.h5')
+                print "Calculating errors for validation set ..."
+                preds = data_val >> Map(organize_features) >> build_batch >> Map(
+                    predict_network_batch) >> Flatten() >> Map(scale_activators) >> Collect()
+                RMSE_e = RMSE_np(preds, trues)
+                if RMSE_e < best_RMSE_gen:
+                    model_json = model.to_json()
+                    with open('./outputs/model_' + dataset_name + '_' + str(gen) + '.json', "w") as json_file:
+                        json_file.write(model_json)
+                    model.save_weights('./outputs/weights_' + dataset_name + '_' + str(gen) + '.h5')
+                    best_RMSE_gen = RMSE_e
 
-            preds = data_test >> Map(organize_features) >> build_batch >> Map(
-                predict_network_batch) >> Flatten() >> Map(
-                scale_activators) >> Collect()
+                print "Calculating errors for test set ..."
+                trues = data_test >> GetCols(Act_inx) >> Map(scale_activators) >> Collect()
 
-            RMSE_e = RMSE_np(preds, trues)
-            Rsquared_e = Rsqured_np(preds, trues)
-            print 'Dataset ' + dataset_name + ', Gen ' + str(gen) + ' Test : RMSE = ' + str(
-                RMSE_e) + ', R-Squared = ' + str(Rsquared_e)
-            test_stat_hold.append(('Gen_' + str(gen), RMSE_e, Rsquared_e))
+                preds = data_test >> Map(organize_features) >> build_batch >> Map(
+                    predict_network_batch) >> Flatten() >> Map(
+                    scale_activators) >> Collect()
+                RMSE_e_val = RMSE_e
+                RMSE_e = RMSE_np(preds, trues)
+                Rsquared_e = Rsqured_np(preds, trues)
+                print 'Dataset ' + dataset_name + ', Gen ' + str(gen) + ' Test : RMSE = ' + str(
+                    RMSE_e) + ', R-Squared = ' + str(Rsquared_e)
+                test_stat_hold.append(('Gen_' + str(gen), gen, rrun, RMSE_e, Rsquared_e, RMSE_e_val))
 
             # Evolve network
+            model.load_weights('./outputs/weights_' + dataset_name + '_' + str(gen) + '.h5')
             weight_mask, hidden_shape = evolve.sample_weight_mask(model, weight_mask)
+            if not is_structure_valid(hidden_shape):
+                print 'Stopping Evolution: At least one layer has less than minimum neurones'
+                break
             model = initialize_model(feature_dim=feature_dim, H_shape=hidden_shape)
             model.summary()
             model = evolve.evolve_network(model, weight_mask)

@@ -84,6 +84,7 @@ def sample_weight_mask(model, weight_mask, Fs=0.8, Fc=0.8, first_hidden='dense_1
             cluster_mask[layer.name] = (weights_ > Uniform_mat).astype(np.int8)
 
             H_shape[layer.name] = np.sum(cluster_mask[layer.name])
+            # TODO : prevent H_shape getting values below a treshold - 10
 
     for layer in model.layers:
         if 'dense' in layer.name and '_out' not in layer.name:

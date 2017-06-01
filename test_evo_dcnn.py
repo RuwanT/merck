@@ -16,11 +16,16 @@ EPOCH = 200
 VAL_FREQ = 5
 NET_ARCH = 'merck_net'
 MAX_GENERATIONS = 10
+PLOT_FEATURE_IMP = False
+PLOT_ACCURACY_GEN = True
 
 data_root = '/home/truwan/DATA/merck/preprocessed/'
 
 dataset_names = ['CB1', 'DPP4', 'HIVINT', 'HIVPROT', 'METAB', 'NK1', 'OX1', 'PGP', 'PPB', 'RAT_F',
                  'TDI', 'THROMBIN', 'OX2', '3A4', 'LOGD']
+
+dataset_names = ['OX1', 'PGP', 'PPB', 'RAT_F',
+                 'TDI', 'THROMBIN', 'OX2']
 
 dataset_stats = pd.read_csv(data_root + 'dataset_stats.csv', header=None, names=['mean', 'std'], index_col=0)
 
@@ -83,23 +88,40 @@ def RMSE_np(x, y):
 
 
 def count_trainable_weights(model):
-    num_weights = 0
+    num_weights = 0.
     for layer in model.layers:
         if 'dense' in layer.name:
             weights = layer.get_weights()
             num_weights += weights[0].shape[0]*weights[0].shape[1]
             num_weights += weights[1].shape[0]
-
-            num_weights -= np.sum(np.isclose(weights[0], np.zeros(weights[0].shape, dtype=np.float32), atol=1e-10, rtol=1e-10)).astype(np.int8)
+            # print 'Zero weights: ', np.sum(np.isclose(weights[0], np.zeros(weights[0].shape, dtype=np.float32)).astype(np.int8)), 'Non zero weigths', weights[0].shape[0]*weights[0].shape[1]
+            num_weights -= np.sum(np.isclose(weights[0], np.zeros(weights[0].shape, dtype=np.float32)).astype(np.int8))
 
     return num_weights
+
+
+def get_feature_importance(model, first_layer='dense_1'):
+    """
+    Calculate the input feature importance based on the first layer weights
+    :param model: Keras model
+    :param first_layer: Name of the first layer
+    :return: Vector with feature importance (should sum to 1.)
+    """
+
+    for layer in model.layers:
+        if first_layer in layer.name:
+            weights = layer.get_weights()[0]
+            weights_ = np.mean(np.abs(weights), axis=1)
+            weights_ /= np.max(weights_)
+
+    return weights_
 
 
 if __name__ == "__main__":
     for dataset_name in dataset_names:
         test_stat_hold = list()
 
-        print 'Training on Data-set: ' + dataset_name
+        print 'Testing on Data-set: ' + dataset_name
         test_file = data_root + dataset_name + '_test_disguised.csv'
         train_file = data_root + dataset_name + '_training_disguised.csv'
 
@@ -149,12 +171,17 @@ if __name__ == "__main__":
         scale_activators = lambda x: (
             x[0] * dataset_stats.loc[dataset_name, 'std'] + dataset_stats.loc[dataset_name, 'mean'])
 
+        first_RMSE = 0.
+        first_num_trainable_weights = 0.
+        if PLOT_ACCURACY_GEN:
+            fig, ax1 = plt.subplots()
+            ax2 = ax1.twinx()
         for gen in range(1, MAX_GENERATIONS):
             print "Calculating errors for test set ..."
             json_file = open('./outputs/model_' + dataset_name + '_' + str(gen) + '.json', 'r')
             loaded_model_json = json_file.read()
             json_file.close()
-            loaded_model = model_from_json(loaded_model_json)
+            model = model_from_json(loaded_model_json)
             model.load_weights('./outputs/weights_' + dataset_name + '_' + str(gen) + '.h5')
 
             trues = data_test >> GetCols(Act_inx) >> Map(scale_activators) >> Collect()
@@ -168,9 +195,47 @@ if __name__ == "__main__":
 
             num_trainable_weights = count_trainable_weights(model)
 
+            feature_importance = get_feature_importance(model)
+
             print 'Dataset ' + dataset_name + ', Gen ' + str(gen) + ' Test : RMSE = ' + str(
                 RMSE_e) + ', R-Squared = ' + str(Rsquared_e) + ', num trainiale weights = ' + str(num_trainable_weights)
             test_stat_hold.append(('Gen_' + str(gen), RMSE_e, Rsquared_e, num_trainable_weights))
 
+            # plot histogram of layer 1 weights per feature
+            if PLOT_FEATURE_IMP:
+                h, x = np.histogram(feature_importance, bins=255, density=True, range=(0,1))
+                bincenters = 0.5 * (x[1:] + x[:-1])
+                plt.plot(bincenters, h, label='gen-'+str(gen))
+                plt.pause(1.)
+
+            if PLOT_ACCURACY_GEN:
+                if gen == 1:
+                    first_RMSE = RMSE_e
+                    first_num_trainable_weights = num_trainable_weights
+
+                ax1.plot(gen, first_RMSE/RMSE_e, 'ro')
+                ax2.plot(gen, first_num_trainable_weights/num_trainable_weights, 'bo' )
+                plt.pause(0.1)
+
         writer = WriteCSV('./outputs/test_errors_' + dataset_name + '.csv')
         test_stat_hold >> writer
+
+        # plot histogram of layer 1 weights per feature
+        if PLOT_FEATURE_IMP:
+            plt.legend()
+            plt.savefig('./outputs/feature_importance_' + dataset_name + '.tiff')
+            plt.clf()
+
+        if PLOT_ACCURACY_GEN:
+            ax1.set_ylim([0, 2])
+            ax1.set_xlabel('Generation')
+            ax1.set_ylabel('Relative Accuracy', color='r')
+            ax1.tick_params('y', colors='r')
+
+            ax2.set_ylim([0, 50])
+            ax2.set_ylabel('Relative Efficiency', color='b')
+            ax2.tick_params('y', colors='b')
+            fig.tight_layout()
+
+            plt.savefig('./outputs/Accuracy_gen_' + dataset_name + '.tiff')
+            plt.close()
