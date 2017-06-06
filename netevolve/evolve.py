@@ -21,6 +21,23 @@ def init_weight_mask(model):
     return weight_mask
 
 
+def init_weight_mask_fs(model, flayer_name='dense_in'):
+    """
+    initialize the weight mask used for feature selection to all ones
+    :param model: Keras model
+    :param flayer_name: name of the first input layer
+    :return: Mask matrices for each layer as a dict with layer name as the key. Each mask matrix is a numpy ndarray of 
+                ones with shape of layer weights.          
+    """
+    weight_mask = None
+    for layer in model.layers:
+        if flayer_name in layer.name:
+            weight_shape = layer.get_weights()[0].shape
+            weight_mask = np.eye(weight_shape[0], weight_shape[1], dtype=np.int8)
+
+    return weight_mask
+
+
 def evolve_network(model, weight_mask):
     """
     Set the weights of the model to zero when mask is zero. No learning will happen on these synapses.
@@ -33,6 +50,23 @@ def evolve_network(model, weight_mask):
         if 'dense' in layer.name and '_out' not in layer.name:
             weights = layer.get_weights()
             weights[0] = (weights[0] * weight_mask[layer.name]).astype(np.float32)
+            layer.set_weights(weights)
+
+    return model
+
+
+def evolve_network_fs(model, weight_mask, flayer_name='dense_in'):
+    """
+    Set the weights of the model to zero when mask is zero. No learning will happen on these synapses.
+    :param model: Keras model
+    :param weight_mask: dict of numpy matrices with layer name as key. A synapse exists in net gen network if mask==1 
+    :return: model with zero weighs where the weight mask is zero
+    """
+
+    for layer in model.layers:
+        if flayer_name in layer.name:
+            weights = layer.get_weights()
+            weights[0] = (weights[0] * weight_mask).astype(np.float32)
             layer.set_weights(weights)
 
     return model
@@ -84,7 +118,6 @@ def sample_weight_mask(model, weight_mask, Fs=0.8, Fc=0.8, first_hidden='dense_1
             cluster_mask[layer.name] = (weights_ > Uniform_mat).astype(np.int8)
 
             H_shape[layer.name] = np.sum(cluster_mask[layer.name])
-            # TODO : prevent H_shape getting values below a treshold - 10
 
     for layer in model.layers:
         if 'dense' in layer.name and '_out' not in layer.name:
@@ -97,5 +130,21 @@ def sample_weight_mask(model, weight_mask, Fs=0.8, Fc=0.8, first_hidden='dense_1
                 rows_to_delete = np.nonzero(np.logical_not(cluster_mask[pre_layer_name]).astype(np.int8))
                 weight_mask[layer.name] = np.delete(weight_mask[layer.name], cols_to_delete, axis=1)
                 weight_mask[layer.name] = np.delete(weight_mask[layer.name], rows_to_delete, axis=0)
+
+    return weight_mask, H_shape
+
+
+def sample_weight_mask_fs(model, weight_mask, H_shape,  Fc=0.8, flayer_name='dense_in'):
+    for layer in model.layers:
+        if flayer_name in layer.name:
+            # sample clusters
+            weights = np.mean(np.abs(layer.get_weights()[0]), axis=0)
+            weights_ = normalize_cluster_weights(weights) * Fc
+            Uniform_mat = np.random.random_sample(weights_.shape)
+            cluster_mask = (weights_ > Uniform_mat).astype(np.int8)
+
+            cols_to_delete = np.nonzero(np.logical_not(cluster_mask).astype(np.int8))
+            weight_mask = np.delete(weight_mask, cols_to_delete, axis=1)
+            H_shape[flayer_name] = np.sum(cluster_mask)
 
     return weight_mask, H_shape
