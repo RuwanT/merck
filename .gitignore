@@ -7,6 +7,8 @@ __pycache__/
 *.so
 *.csv
 *.tiff
+*.json
+*.h5
 # Distribution / packaging
 .Python
 env/

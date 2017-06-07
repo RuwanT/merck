@@ -21,7 +21,7 @@ def init_weight_mask(model):
     return weight_mask
 
 
-def init_weight_mask_fs(model, flayer_name='dense_in'):
+def init_weight_mask_fs(model, in_layer_name='dense_in'):
     """
     initialize the weight mask used for feature selection to all ones
     :param model: Keras model
@@ -31,7 +31,7 @@ def init_weight_mask_fs(model, flayer_name='dense_in'):
     """
     weight_mask = None
     for layer in model.layers:
-        if flayer_name in layer.name:
+        if in_layer_name in layer.name:
             weight_shape = layer.get_weights()[0].shape
             weight_mask = np.eye(weight_shape[0], weight_shape[1], dtype=np.int8)
 
@@ -134,17 +134,19 @@ def sample_weight_mask(model, weight_mask, Fs=0.8, Fc=0.8, first_hidden='dense_1
     return weight_mask, H_shape
 
 
-def sample_weight_mask_fs(model, weight_mask, H_shape,  Fc=0.8, flayer_name='dense_in'):
+def sample_weight_mask_fs(model, weight_mask, H_shape,  Fc=0.8, in_layer_name='dense_in', first_hidden='dense_1'):
     for layer in model.layers:
-        if flayer_name in layer.name:
+        if in_layer_name in layer.name:
             # sample clusters
             weights = np.mean(np.abs(layer.get_weights()[0]), axis=0)
-            weights_ = normalize_cluster_weights(weights) * Fc
-            Uniform_mat = np.random.random_sample(weights_.shape)
-            cluster_mask = (weights_ > Uniform_mat).astype(np.int8)
+            weights_ = np.abs(weights)
+            q80 = np.percentile(weights_, int((1. - Fc)*100.))
+            # Uniform_mat = np.random.random_sample(weights_.shape)
+            cluster_mask = (weights_ > q80).astype(np.int8)
+            # cluster_mask = (weights_ > Uniform_mat).astype(np.int8)
 
             cols_to_delete = np.nonzero(np.logical_not(cluster_mask).astype(np.int8))
             weight_mask = np.delete(weight_mask, cols_to_delete, axis=1)
-            H_shape[flayer_name] = np.sum(cluster_mask)
+            H_shape[in_layer_name] = np.sum(cluster_mask)
 
     return weight_mask, H_shape

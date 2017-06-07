@@ -5,21 +5,23 @@ from custom_networks import deep_net, merck_net, merck_net_fs
 from custom_metric import Rsqured
 import numpy as np
 import pandas as pd
-from keras.optimizers import Adam, sgd
+from keras.optimizers import Adam, SGD
 import sys
 from netevolve import evolve
 import os
 from keras.models import model_from_json
+from keras import backend as K
 
-os.environ["CUDA_VISIBLE_DEVICES"]="5,6,7,8"
+os.environ["CUDA_VISIBLE_DEVICES"]="4"
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
 # Global variables
-BATCH_SIZE = 64
+BATCH_SIZE = 128
 EPOCH = 50
 VAL_FREQ = 5
 NET_ARCH = 'merck_net_fs'
-MAX_GENERATIONS = 5
-N_RUNS = 10
+MAX_GENERATIONS = 10
+N_RUNS = 1
 GEN_FEATURE_SELECT = 0
 
 # TODO: Test code
@@ -44,16 +46,21 @@ def initialize_model(feature_dim, H_shape):
         opti = Adam(lr=0.0001, beta_1=0.5)
     elif NET_ARCH == 'merck_net':
         model = merck_net(input_shape=(feature_dim,), hidden_shape=H_shape)
-        opti = sgd(lr=0.05, momentum=0.9, clipnorm=1.0)
+        opti = SGD(lr=0.05, momentum=0.9, clipnorm=1.0)
     elif NET_ARCH == 'merck_net_fs':
         model = merck_net_fs(input_shape=(feature_dim,), hidden_shape=H_shape)
-        opti = sgd(lr=0.05, momentum=0.9, clipnorm=1.0)
+        opti = SGD(lr=0.05, momentum=0.9, clipnorm=1.0)
+        # for layer in model.layers:
+        #     if 'dense_in' in layer.name:
+        #         layer.trainable = False
+
     else:
         sys.exit("Network not defined correctly, check NET_ARCH. ")
 
     model.compile(optimizer=opti, loss='mean_squared_error', metrics=[Rsqured])
+    model.summary()
 
-    return model
+    return model, opti
 
 
 def Rsqured_np(x, y):
@@ -133,6 +140,7 @@ if __name__ == "__main__":
         data_train = ReadPandas(train_file, dropnan=True)
         Act_inx = data_train.dataframe.columns.get_loc('Act')
         feature_dim = data_train.dataframe.shape[1] - (Act_inx + 1)
+        print dataset_name + ' has ' + str(feature_dim) + ' features'
 
         # split randomly train and val
         data_train, data_val = data_train >> SplitRandom(ratio=0.8) >> Collect()
@@ -171,16 +179,19 @@ if __name__ == "__main__":
         scale_activators = lambda x: (
             x[0] * dataset_stats.loc[dataset_name, 'std'] + dataset_stats.loc[dataset_name, 'mean'])
 
-        hidden_shape = {'dense_in': feature_dim, 'dense_1': 4000, 'dense_2': 2000, 'dense_3': 1000, 'dense_4': 1000}
-        model = initialize_model(feature_dim=feature_dim, H_shape=hidden_shape)
-        weight_mask = evolve.init_weight_mask_fs(model)
-        # make sure the input layer weight matrix has one synapse per neurone
-        model = evolve.evolve_network_fs(model, weight_mask)
-
+        trues_val = data_val >> GetCols(Act_inx) >> Map(scale_activators) >> Collect()
+        trues_test = data_test >> GetCols(Act_inx) >> Map(scale_activators) >> Collect()
         for rrun in range(0, N_RUNS):
+
+            hidden_shape = {'dense_in': feature_dim, 'dense_1': 4000, 'dense_2': 2000, 'dense_3': 1000, 'dense_4': 1000}
+            model, opti = initialize_model(feature_dim=feature_dim, H_shape=hidden_shape)
+            weight_mask = evolve.init_weight_mask_fs(model)
+            # make sure the input layer weight matrix has one synapse per neurone
+            model = evolve.evolve_network_fs(model, weight_mask)
+
             for gen in range(0, MAX_GENERATIONS):
                 print 'Feature Selection dataset ' + dataset_name + ', generation: ' + str(gen)
-                trues = data_val >> GetCols(Act_inx) >> Map(scale_activators) >> Collect()
+
                 best_RMSE = float("inf")
                 for e in range(1, EPOCH + 1):
                     # training the network
@@ -192,36 +203,45 @@ if __name__ == "__main__":
                         preds = data_val >> Map(organize_features) >> build_batch >> Map(
                             predict_network_batch) >> Flatten() >> Map(scale_activators) >> Collect()
 
-                        RMSE_e = RMSE_np(preds, trues)
+                        RMSE_e = RMSE_np(preds, trues_val)
+
+                        preds = data_test >> Map(organize_features) >> build_batch >> Map(
+                            predict_network_batch) >> Flatten() >> Map(scale_activators) >> Collect()
+
+                        RMSE_test = RMSE_np(preds, trues_test)
+
+                        print e, RMSE_e, RMSE_test, K.get_value(opti.lr)
 
                         if RMSE_e < best_RMSE:
                             model_json = model.to_json()
                             model.save_weights(
-                                './outputs/weights_' + dataset_name + '_' + 'temp' + '.h5')
+                                './outputs/weights_' + dataset_name + '_' + 'temp1' + '.h5')
                             best_RMSE = RMSE_e
 
+                    # change leaning rate every 10-th epoch
+                    if int(e) % 10 == 0:
+                        K.set_value(opti.lr, 0.5 * K.get_value(opti.lr))
+
                 # load best model
-                model.load_weights('./outputs/weights_' + dataset_name + '_' + 'temp' + '.h5')
+                model.load_weights('./outputs/weights_' + dataset_name + '_' + 'temp1' + '.h5')
 
                 print "Calculating errors for test set ..."
-                trues = data_test >> GetCols(Act_inx) >> Map(scale_activators) >> Collect()
-
                 preds = data_test >> Map(organize_features) >> build_batch >> Map(
                     predict_network_batch) >> Flatten() >> Map(
                     scale_activators) >> Collect()
 
-                RMSE_e = RMSE_np(preds, trues)
-                Rsquared_e = Rsqured_np(preds, trues)
+                RMSE_e = RMSE_np(preds, trues_test)
+                Rsquared_e = Rsqured_np(preds, trues_test)
                 print 'Dataset ' + dataset_name + ', Gen ' + str(gen) + ' Test : RMSE = ' + str(
                     RMSE_e) + ', R-Squared = ' + str(Rsquared_e)
                 test_stat_hold.append((rrun, gen , RMSE_e, Rsquared_e, best_RMSE))
 
                 # Select features for next generation
                 weight_mask, hidden_shape = evolve.sample_weight_mask_fs(model, weight_mask, hidden_shape)
-                model = initialize_model(feature_dim=feature_dim, H_shape=hidden_shape)
-                model.summary()
+                K.clear_session()
+                model, opti = initialize_model(feature_dim=feature_dim, H_shape=hidden_shape)
                 model = evolve.evolve_network_fs(model, weight_mask)
 
                 # Save the weight matrix
                 selected_features = np.sum(weight_mask, axis=0)
-                np.save('selected_features' + str(rrun) + '_' + str(gen) + '.npy', selected_features)
+                np.save('./outputs/selected_features' + str(rrun) + '_' + str(gen) + '.npy', selected_features)

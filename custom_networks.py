@@ -117,23 +117,27 @@ def merck_net_fs(input_shape=(128),
     model = models.Sequential()
 
     model.add(Dense(hidden_shape['dense_in'], activation='relu', input_shape=input_shape, kernel_regularizer=l2(0.0001),
-                    kernel_initializer=Ones(),name='dense_in'))
+                    kernel_initializer=Ones(), name='dense_in'))
     # model.add(Dropout(0.25, name='drop_1'))
 
     model.add(Dense(hidden_shape['dense_1'], activation='relu', input_shape=input_shape, kernel_regularizer=l2(0.0001),
                     name='dense_1'))
+    model.add(BatchNormalization(axis=-1, momentum=0.99, epsilon=0.001))
     model.add(Dropout(0.25, name='drop_1'))
 
     model.add(Dense(hidden_shape['dense_2'], activation='relu', input_shape=input_shape, kernel_regularizer=l2(0.0001),
                     name='dense_2'))
+    model.add(BatchNormalization(axis=-1, momentum=0.99, epsilon=0.001))
     model.add(Dropout(0.25, name='drop_2'))
 
     model.add(Dense(hidden_shape['dense_3'], activation='relu', input_shape=input_shape, kernel_regularizer=l2(0.0001),
                     name='dense_3'))
+    model.add(BatchNormalization(axis=-1, momentum=0.99, epsilon=0.001))
     model.add(Dropout(0.25, name='drop_3'))
 
     model.add(Dense(hidden_shape['dense_4'], activation='relu', input_shape=input_shape, kernel_regularizer=l2(0.0001),
                     name='dense_4'))
+    model.add(BatchNormalization(axis=-1, momentum=0.99, epsilon=0.001))
     model.add(Dropout(0.10, name='drop_4'))
 
     model.add(Dense(1, activation=None, use_bias=True, kernel_regularizer=l2(0.0001), name='dense_out'))

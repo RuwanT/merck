@@ -9,6 +9,7 @@ from keras.optimizers import Adam, sgd
 import sys
 from netevolve import evolve
 import os
+from keras import backend as K
 
 os.environ["CUDA_VISIBLE_DEVICES"]="5,6,7,8"
 
@@ -24,6 +25,7 @@ data_root = '/home/truwan/DATA/merck/preprocessed/'
 
 dataset_names = ['CB1', 'DPP4', 'HIVINT', 'HIVPROT', 'METAB', 'NK1', 'OX1', 'PGP', 'PPB', 'RAT_F',
                  'TDI', 'THROMBIN', 'OX2', '3A4', 'LOGD']
+dataset_names = ['CB1', 'LOGD']
 
 dataset_stats = pd.read_csv(data_root + 'dataset_stats.csv', header=None, names=['mean', 'std'], index_col=0)
 
@@ -232,6 +234,8 @@ if __name__ == "__main__":
             if not is_structure_valid(hidden_shape):
                 print 'Stopping Evolution: At least one layer has less than minimum neurones'
                 break
+
+            K.clear_session()   #clear the old model from GPU memory
             model = initialize_model(feature_dim=feature_dim, H_shape=hidden_shape)
             model.summary()
             model = evolve.evolve_network(model, weight_mask)
