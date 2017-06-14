@@ -11,8 +11,9 @@ from netevolve import evolve
 import os
 from keras.models import model_from_json
 from keras import backend as K
+from multigpu import multi_gpu
 
-os.environ["CUDA_VISIBLE_DEVICES"]="4"
+os.environ["CUDA_VISIBLE_DEVICES"] = "4"
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
 # Global variables
@@ -21,10 +22,8 @@ EPOCH = 50
 VAL_FREQ = 5
 NET_ARCH = 'merck_net_fs'
 MAX_GENERATIONS = 10
-N_RUNS = 1
+N_RUNS = 3
 GEN_FEATURE_SELECT = 0
-
-# TODO: Test code
 
 data_root = '/home/truwan/DATA/merck/preprocessed/'
 
@@ -57,6 +56,7 @@ def initialize_model(feature_dim, H_shape):
     else:
         sys.exit("Network not defined correctly, check NET_ARCH. ")
 
+    # model = multi_gpu.make_parallel(model, 2)
     model.compile(optimizer=opti, loss='mean_squared_error', metrics=[Rsqured])
     model.summary()
 
@@ -99,7 +99,7 @@ def RMSE_np(x, y):
     return np.sqrt(np.sum(np.square(x - y)) / n)
 
 
-def is_structure_valid(hidden_shape, min_neurones=10):
+def is_structure_valid(hidden_shape, min_neurones=5):
     is_valid = True
     for k, h in hidden_shape.iteritems():
         if h < min_neurones:
@@ -176,6 +176,7 @@ if __name__ == "__main__":
         def predict_network_batch(sample):
             return model.predict(sample[0])
 
+
         scale_activators = lambda x: (
             x[0] * dataset_stats.loc[dataset_name, 'std'] + dataset_stats.loc[dataset_name, 'mean'])
 
@@ -205,12 +206,12 @@ if __name__ == "__main__":
 
                         RMSE_e = RMSE_np(preds, trues_val)
 
-                        preds = data_test >> Map(organize_features) >> build_batch >> Map(
-                            predict_network_batch) >> Flatten() >> Map(scale_activators) >> Collect()
-
-                        RMSE_test = RMSE_np(preds, trues_test)
-
-                        print e, RMSE_e, RMSE_test, K.get_value(opti.lr)
+                        # preds = data_test >> Map(organize_features) >> build_batch >> Map(
+                        #     predict_network_batch) >> Flatten() >> Map(scale_activators) >> Collect()
+                        #
+                        # RMSE_test = RMSE_np(preds, trues_test)
+                        #
+                        # print e, RMSE_e, RMSE_test, K.get_value(opti.lr)
 
                         if RMSE_e < best_RMSE:
                             model_json = model.to_json()
@@ -234,14 +235,30 @@ if __name__ == "__main__":
                 Rsquared_e = Rsqured_np(preds, trues_test)
                 print 'Dataset ' + dataset_name + ', Gen ' + str(gen) + ' Test : RMSE = ' + str(
                     RMSE_e) + ', R-Squared = ' + str(Rsquared_e)
-                test_stat_hold.append((rrun, gen , RMSE_e, Rsquared_e, best_RMSE))
+                test_stat_hold.append(
+                    (rrun, gen, RMSE_e, Rsquared_e, best_RMSE, hidden_shape['dense_in']))
+
+                # model_json = model.to_json()
+                # with open('./outputs/model_' + dataset_name + '_' + str(gen) + '_' + str(rrun) + '.json', "w") as json_file:
+                #     json_file.write(model_json)
+                # model.save_weights('./outputs/weights_' + dataset_name + '_' + str(gen) + '_' + str(rrun) + '.h5')
 
                 # Select features for next generation
-                weight_mask, hidden_shape = evolve.sample_weight_mask_fs(model, weight_mask, hidden_shape)
+                fc = 10 ** ((1. - np.log10(feature_dim)) / 9)
+                weight_mask, hidden_shape = evolve.sample_weight_mask_fs(model, weight_mask, hidden_shape, Fc=fc,
+                                                                         sampling_type='deterministic')
+                if not is_structure_valid(hidden_shape):
+                    print 'Stopping Evolution: At least one layer has less than minimum neurones'
+                    break
+
                 K.clear_session()
                 model, opti = initialize_model(feature_dim=feature_dim, H_shape=hidden_shape)
                 model = evolve.evolve_network_fs(model, weight_mask)
 
                 # Save the weight matrix
-                selected_features = np.sum(weight_mask, axis=0)
-                np.save('./outputs/selected_features' + str(rrun) + '_' + str(gen) + '.npy', selected_features)
+                selected_features = np.sum(weight_mask, axis=1)
+                np.save('./outputs/featureSelect_' + dataset_name + '_' + str(rrun) + '_' + str(gen) + '.npy',
+                        selected_features)
+
+        writer = WriteCSV('./outputs/feature_selection_' + dataset_name + '.csv')
+        test_stat_hold >> writer

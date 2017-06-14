@@ -15,8 +15,10 @@ PLOT_ACCURACY_GEN = True
 
 data_root = '/home/truwan/DATA/merck/preprocessed/'
 
-dataset_names = ['CB1', 'DPP4', 'HIVINT', 'HIVPROT', 'METAB', 'NK1', 'OX1', 'PGP', 'PPB', 'RAT_F',
-                 'TDI', 'THROMBIN', 'OX2']
+# dataset_names = ['CB1', 'DPP4', 'HIVINT', 'HIVPROT', 'METAB', 'NK1', 'OX1', 'PGP', 'PPB', 'RAT_F',
+#                  'TDI', 'THROMBIN', 'OX2']
+
+dataset_names = ['CB1', 'LOGD']
 
 
 def plot_net_evolve():
@@ -79,7 +81,20 @@ def print_res_of_gen(gen):
                 print dataset_name, row['med'], row['nparam']
 
 
+def selected_features():
+    a = np.load('/home/truwan/projects/merck/outputs/selected_features0_5.npy')
+    b = np.load('/home/truwan/projects/merck/outputs/selected_features1_5.npy')
+    print len(a)
+    a = set(np.nonzero(a))
+    b = set(np.nonzero(b))
+
+    ab =a.intersection(b)
+    apb = a.union(b)
+
+    print len(ab) / len(apb)
+
 
 if __name__ == "__main__":
     # plot_net_evolve()
-    print_res_of_gen(0)
+    # print_res_of_gen(0)
+    selected_features()

@@ -134,16 +134,18 @@ def sample_weight_mask(model, weight_mask, Fs=0.8, Fc=0.8, first_hidden='dense_1
     return weight_mask, H_shape
 
 
-def sample_weight_mask_fs(model, weight_mask, H_shape,  Fc=0.8, in_layer_name='dense_in', first_hidden='dense_1'):
+def sample_weight_mask_fs(model, weight_mask, H_shape,  Fc=0.8, sampling_type='deterministic', in_layer_name='dense_in', first_hidden='dense_1'):
     for layer in model.layers:
         if in_layer_name in layer.name:
-            # sample clusters
-            weights = np.mean(np.abs(layer.get_weights()[0]), axis=0)
-            weights_ = np.abs(weights)
-            q80 = np.percentile(weights_, int((1. - Fc)*100.))
-            # Uniform_mat = np.random.random_sample(weights_.shape)
-            cluster_mask = (weights_ > q80).astype(np.int8)
-            # cluster_mask = (weights_ > Uniform_mat).astype(np.int8)
+            if 'deterministic' in sampling_type:
+                weights = np.mean(np.abs(layer.get_weights()[0]), axis=0)
+                fc_percentile = np.percentile(weights, int((1. - Fc)*100.))
+                cluster_mask = (weights > fc_percentile).astype(np.int8)
+            elif 'importance' in sampling_type:
+                weights = np.mean(np.abs(layer.get_weights()[0]), axis=0)
+                weights_ = normalize_cluster_weights(weights) * Fc
+                uniform_mat = np.random.random_sample(weights_.shape)
+                cluster_mask = (weights_ > uniform_mat).astype(np.int8)
 
             cols_to_delete = np.nonzero(np.logical_not(cluster_mask).astype(np.int8))
             weight_mask = np.delete(weight_mask, cols_to_delete, axis=1)
