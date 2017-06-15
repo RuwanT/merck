@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 from keras.optimizers import Adam, sgd
 import sys
-
+from keras.models import model_from_json
 
 # Global variables
 BATCH_SIZE = 64
@@ -64,3 +64,21 @@ dataset_stats = pd.read_csv(data_root + 'dataset_stats.csv', header=None, names=
 #             else:
 #                 print layer.name, 'No weights'
 
+
+dataset_name = 'CB1'
+GEN_FEATURE_SELECT = 0
+feature_dim = 10
+
+json_file = open('./outputs/model_' + dataset_name + '_' + str(GEN_FEATURE_SELECT) + '.json', 'r')
+loaded_model_json = json_file.read()
+json_file.close()
+base_model = model_from_json(loaded_model_json)
+# base_model.load_weights('C:\\GIT_codes\\backup_models\\outputs_train_evo_net\\weights_' + dataset_name + '_' + str(GEN_FEATURE_SELECT) + '.h5')
+
+hidden_shape = {'dense_in': feature_dim, 'dense_1': 4000, 'dense_2': 2000, 'dense_3': 1000, 'dense_4': 1000}
+for layer in base_model.layers:
+    if 'dense' in layer.name and 'out' not in layer.name:
+        hidden_shape[layer.name] = layer.get_config()['units']
+        print layer.get_config()['units']
+
+print hidden_shape

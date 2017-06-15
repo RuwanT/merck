@@ -183,12 +183,29 @@ if __name__ == "__main__":
         trues_val = data_val >> GetCols(Act_inx) >> Map(scale_activators) >> Collect()
         trues_test = data_test >> GetCols(Act_inx) >> Map(scale_activators) >> Collect()
         for rrun in range(0, N_RUNS):
+            # TODO : Check code
+            json_file = open('./outputs/model_' + dataset_name + '_' + str(GEN_FEATURE_SELECT) + '.json', 'r')
+            loaded_model_json = json_file.read()
+            json_file.close()
+            base_model = model_from_json(loaded_model_json)
+            base_model.load_weights('./outputs/weights_' + dataset_name + '_' + str(GEN_FEATURE_SELECT) + '.h5')
 
             hidden_shape = {'dense_in': feature_dim, 'dense_1': 4000, 'dense_2': 2000, 'dense_3': 1000, 'dense_4': 1000}
+            for layer in base_model.layers:
+                if 'dense' in layer.name and 'out' not in layer.name:
+                    hidden_shape[layer.name] = layer.get_config()['units']
+
             model, opti = initialize_model(feature_dim=feature_dim, H_shape=hidden_shape)
             weight_mask = evolve.init_weight_mask_fs(model)
             # make sure the input layer weight matrix has one synapse per neurone
             model = evolve.evolve_network_fs(model, weight_mask)
+
+            for layer in model.layers:
+                if 'dense' in layer.name and 'in' not in layer.name:
+                    base_layer = base_model.get_layer(layer.name)
+                    model.set_weights(base_layer.get_weights())
+                    layer.trainable = False
+
 
             for gen in range(0, MAX_GENERATIONS):
                 print 'Feature Selection dataset ' + dataset_name + ', generation: ' + str(gen)
@@ -245,6 +262,7 @@ if __name__ == "__main__":
 
                 # Select features for next generation
                 fc = 10 ** ((1. - np.log10(feature_dim)) / 9)
+                # TODO : change code so that freezing upper layers is possible
                 weight_mask, hidden_shape = evolve.sample_weight_mask_fs(model, weight_mask, hidden_shape, Fc=fc,
                                                                          sampling_type='deterministic')
                 if not is_structure_valid(hidden_shape):
