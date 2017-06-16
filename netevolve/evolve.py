@@ -152,3 +152,23 @@ def sample_weight_mask_fs(model, weight_mask, H_shape,  Fc=0.8, sampling_type='d
             H_shape[in_layer_name] = np.sum(cluster_mask)
 
     return weight_mask, H_shape
+
+
+def load_weights_fs(model, base_model, weight_mask, first_hidden='dense_1'):
+    selected_features = np.sum(weight_mask, axis=1).astype(np.int8)
+    rows_to_delete = np.nonzero(np.logical_not(selected_features).astype(np.int8))
+
+    for layer in model.layers:
+        if 'dense' in layer.name and 'in' not in layer.name:
+            base_layer = base_model.get_layer(layer.name)
+            if first_hidden in layer.name:
+                weights = base_layer.get_weights()
+                weights[0] = np.delete(weights[0], rows_to_delete, axis=0)
+                layer.set_weights(weights)
+            else:
+                layer.set_weights(base_layer.get_weights())
+            layer.trainable = False
+        if 'dense' in layer.name and 'in' in layer.name:
+            layer.trainable = True
+
+    return model

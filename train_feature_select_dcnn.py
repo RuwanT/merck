@@ -13,22 +13,25 @@ from keras.models import model_from_json
 from keras import backend as K
 from multigpu import multi_gpu
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "4"
+os.environ["CUDA_VISIBLE_DEVICES"] = "5"
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
 # Global variables
 BATCH_SIZE = 128
 EPOCH = 50
 VAL_FREQ = 5
-NET_ARCH = 'merck_net_fs'
+NET_ARCH = 'merck_net_fs_nobn'
 MAX_GENERATIONS = 10
-N_RUNS = 3
-GEN_FEATURE_SELECT = 0
+N_RUNS = 5
+DETERMINISTIC_SAMPLING = False
+LOAD_PRETRAIN_WEIGHTS = True
 
 data_root = '/home/truwan/DATA/merck/preprocessed/'
+feature_select_gen = {'CB1': 5, 'DPP4': 5, 'HIVINT': 5, 'HIVPROT': 6, 'METAB': 4, 'NK1': 5, 'OX1': 5, 'PGP': 6,
+                      'PPB': 6, 'RAT_F': 6, 'TDI': 6, 'THROMBIN': 6, 'OX2': 5}
 
 dataset_names = ['CB1', 'DPP4', 'HIVINT', 'HIVPROT', 'METAB', 'NK1', 'OX1', 'PGP', 'PPB', 'RAT_F',
-                 'TDI', 'THROMBIN', 'OX2', '3A4', 'LOGD']
+                 'TDI', 'THROMBIN', 'OX2'] # , '3A4', 'LOGD'
 
 dataset_stats = pd.read_csv(data_root + 'dataset_stats.csv', header=None, names=['mean', 'std'], index_col=0)
 
@@ -49,6 +52,9 @@ def initialize_model(feature_dim, H_shape):
     elif NET_ARCH == 'merck_net_fs':
         model = merck_net_fs(input_shape=(feature_dim,), hidden_shape=H_shape)
         opti = SGD(lr=0.05, momentum=0.9, clipnorm=1.0)
+    elif NET_ARCH == 'merck_net_fs_nobn':
+        model = merck_net_fs(input_shape=(feature_dim,), is_bn=False, hidden_shape=H_shape)
+        opti = SGD(lr=0.05, momentum=0.9, clipnorm=1.0)
         # for layer in model.layers:
         #     if 'dense_in' in layer.name:
         #         layer.trainable = False
@@ -57,8 +63,8 @@ def initialize_model(feature_dim, H_shape):
         sys.exit("Network not defined correctly, check NET_ARCH. ")
 
     # model = multi_gpu.make_parallel(model, 2)
-    model.compile(optimizer=opti, loss='mean_squared_error', metrics=[Rsqured])
-    model.summary()
+    # model.compile(optimizer=opti, loss='mean_squared_error', metrics=[Rsqured])
+    # model.summary()
 
     return model, opti
 
@@ -129,6 +135,18 @@ def get_stats(error_list, gen):
     return mean_rmse, std_rmse, med_rmse
 
 
+def load_base_model(dataset_name):
+    assert os.path.isfile('./outputs/model_' + dataset_name + '_' + str(feature_select_gen[dataset_name]) + '.json')
+    assert os.path.isfile('./outputs/weights_' + dataset_name + '_' + str(feature_select_gen[dataset_name]) + '.h5')
+    json_file = open('./outputs/model_' + dataset_name + '_' + str(feature_select_gen[dataset_name]) + '.json', 'r')
+    loaded_model_json = json_file.read()
+    json_file.close()
+    base_model_ = model_from_json(loaded_model_json)
+    base_model_.load_weights('./outputs/weights_' + dataset_name + '_' + str(feature_select_gen[dataset_name]) + '.h5')
+    # base_model_.summary()
+
+    return base_model_
+
 if __name__ == "__main__":
     for dataset_name in dataset_names:
         test_stat_hold = list()
@@ -176,19 +194,14 @@ if __name__ == "__main__":
         def predict_network_batch(sample):
             return model.predict(sample[0])
 
-
         scale_activators = lambda x: (
             x[0] * dataset_stats.loc[dataset_name, 'std'] + dataset_stats.loc[dataset_name, 'mean'])
 
         trues_val = data_val >> GetCols(Act_inx) >> Map(scale_activators) >> Collect()
         trues_test = data_test >> GetCols(Act_inx) >> Map(scale_activators) >> Collect()
         for rrun in range(0, N_RUNS):
-            # TODO : Check code
-            json_file = open('./outputs/model_' + dataset_name + '_' + str(GEN_FEATURE_SELECT) + '.json', 'r')
-            loaded_model_json = json_file.read()
-            json_file.close()
-            base_model = model_from_json(loaded_model_json)
-            base_model.load_weights('./outputs/weights_' + dataset_name + '_' + str(GEN_FEATURE_SELECT) + '.h5')
+            # Load the best model from network evolve training (used all features)
+            base_model = load_base_model(dataset_name)
 
             hidden_shape = {'dense_in': feature_dim, 'dense_1': 4000, 'dense_2': 2000, 'dense_3': 1000, 'dense_4': 1000}
             for layer in base_model.layers:
@@ -199,13 +212,10 @@ if __name__ == "__main__":
             weight_mask = evolve.init_weight_mask_fs(model)
             # make sure the input layer weight matrix has one synapse per neurone
             model = evolve.evolve_network_fs(model, weight_mask)
-
-            for layer in model.layers:
-                if 'dense' in layer.name and 'in' not in layer.name:
-                    base_layer = base_model.get_layer(layer.name)
-                    model.set_weights(base_layer.get_weights())
-                    layer.trainable = False
-
+            if LOAD_PRETRAIN_WEIGHTS:
+                evolve.load_weights_fs(model, base_model, weight_mask)
+            model.compile(optimizer=opti, loss='mean_squared_error', metrics=[Rsqured])
+            # model.summary()
 
             for gen in range(0, MAX_GENERATIONS):
                 print 'Feature Selection dataset ' + dataset_name + ', generation: ' + str(gen)
@@ -261,10 +271,15 @@ if __name__ == "__main__":
                 # model.save_weights('./outputs/weights_' + dataset_name + '_' + str(gen) + '_' + str(rrun) + '.h5')
 
                 # Select features for next generation
-                fc = 10 ** ((1. - np.log10(feature_dim)) / 9)
-                # TODO : change code so that freezing upper layers is possible
+                if DETERMINISTIC_SAMPLING:
+                    fc = 10 ** ((1. - np.log10(feature_dim)) / 9)
+                    sampling_type = 'deterministic'
+                else:
+                    fc = 0.8
+                    sampling_type = 'importance'
+
                 weight_mask, hidden_shape = evolve.sample_weight_mask_fs(model, weight_mask, hidden_shape, Fc=fc,
-                                                                         sampling_type='deterministic')
+                                                                         sampling_type=sampling_type)
                 if not is_structure_valid(hidden_shape):
                     print 'Stopping Evolution: At least one layer has less than minimum neurones'
                     break
@@ -272,11 +287,15 @@ if __name__ == "__main__":
                 K.clear_session()
                 model, opti = initialize_model(feature_dim=feature_dim, H_shape=hidden_shape)
                 model = evolve.evolve_network_fs(model, weight_mask)
+                if LOAD_PRETRAIN_WEIGHTS:
+                    base_model = load_base_model(dataset_name)
+                    model = evolve.load_weights_fs(model, base_model, weight_mask)
+                model.compile(optimizer=opti, loss='mean_squared_error', metrics=[Rsqured])
 
                 # Save the weight matrix
                 selected_features = np.sum(weight_mask, axis=1)
-                np.save('./outputs/featureSelect_' + dataset_name + '_' + str(rrun) + '_' + str(gen) + '.npy',
+                np.save('./outputs/featureSelect_bm_' + dataset_name + '_' + str(rrun) + '_' + str(gen) + '.npy',
                         selected_features)
 
-        writer = WriteCSV('./outputs/feature_selection_' + dataset_name + '.csv')
+        writer = WriteCSV('./outputs/feature_selection_bm_' + dataset_name + '.csv')
         test_stat_hold >> writer
