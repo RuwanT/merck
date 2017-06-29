@@ -65,20 +65,41 @@ dataset_stats = pd.read_csv(data_root + 'dataset_stats.csv', header=None, names=
 #                 print layer.name, 'No weights'
 
 
-dataset_name = 'CB1'
-GEN_FEATURE_SELECT = 0
-feature_dim = 10
+# dataset_name = 'CB1'
+# GEN_FEATURE_SELECT = 0
+# feature_dim = 10
+#
+# json_file = open('./outputs/model_' + dataset_name + '_' + str(GEN_FEATURE_SELECT) + '.json', 'r')
+# loaded_model_json = json_file.read()
+# json_file.close()
+# base_model = model_from_json(loaded_model_json)
+# # base_model.load_weights('C:\\GIT_codes\\backup_models\\outputs_train_evo_net\\weights_' + dataset_name + '_' + str(GEN_FEATURE_SELECT) + '.h5')
+#
+# hidden_shape = {'dense_in': feature_dim, 'dense_1': 4000, 'dense_2': 2000, 'dense_3': 1000, 'dense_4': 1000}
+# for layer in base_model.layers:
+#     if 'dense' in layer.name and 'out' not in layer.name:
+#         hidden_shape[layer.name] = layer.get_config()['units']
+#         print layer.get_config()['units']
+#
+# print hidden_shape
 
-json_file = open('./outputs/model_' + dataset_name + '_' + str(GEN_FEATURE_SELECT) + '.json', 'r')
-loaded_model_json = json_file.read()
-json_file.close()
-base_model = model_from_json(loaded_model_json)
-# base_model.load_weights('C:\\GIT_codes\\backup_models\\outputs_train_evo_net\\weights_' + dataset_name + '_' + str(GEN_FEATURE_SELECT) + '.h5')
+# mult = 2.
+#
+# def test_funct(sample):
+#     return sample[0]*mult
+#
+# [(1,3),(2,7),(2,3),(6,9)] >> Map(test_funct) >> Print() >> Consume()
+#
+#
+# mult = 4.
+#
+# [(1,3),(2,7),(2,3),(6,9)] >> Map(test_funct) >> Print() >> Consume()
 
-hidden_shape = {'dense_in': feature_dim, 'dense_1': 4000, 'dense_2': 2000, 'dense_3': 1000, 'dense_4': 1000}
-for layer in base_model.layers:
-    if 'dense' in layer.name and 'out' not in layer.name:
-        hidden_shape[layer.name] = layer.get_config()['units']
-        print layer.get_config()['units']
 
-print hidden_shape
+for i in range(1,10):
+    fname = '/home/truwan/projects/merck/outputs/w_bm_CB1_0_' + str(i) + '.npy'
+    img = np.load(fname).astype(np.float)
+    a, x = np.histogram(img, 1000, range=(-.5,1.5), density=True)
+    plt.plot(x[:-1], a)
+    plt.xlim([-.1, .1])
+    plt.pause(1)

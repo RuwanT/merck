@@ -18,19 +18,18 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
 # Global variables
 BATCH_SIZE = 128
-EPOCH = 70
+EPOCH = 50
 VAL_FREQ = 5
 NET_ARCH = 'merck_net'
 MAX_GENERATIONS = 10
-N_RUNS = 20
+N_RUNS = 5
 DETERMINISTIC_SAMPLING = True
-USE_CORRELATION = False
 LOAD_PRETRAIN_WEIGHTS = True
 FINAL_FEATURE_DIM = 5
 
 data_root = '/home/truwan/DATA/merck/preprocessed/'
-feature_select_gen = {'CB1': 5, 'DPP4': 7, 'HIVINT': 9, 'HIVPROT': 5, 'METAB': 6, 'NK1': 6, 'OX1': 8, 'PGP': 7,
-                      'PPB': 6, 'RAT_F': 8, 'TDI': 7, 'THROMBIN': 7, 'OX2': 6}
+feature_select_gen = {'CB1': 5, 'DPP4': 5, 'HIVINT': 5, 'HIVPROT': 6, 'METAB': 4, 'NK1': 5, 'OX1': 5, 'PGP': 6,
+                      'PPB': 6, 'RAT_F': 6, 'TDI': 6, 'THROMBIN': 6, 'OX2': 5}
 
 dataset_names = ['CB1', 'DPP4', 'HIVINT', 'HIVPROT', 'METAB', 'NK1', 'OX1', 'PGP', 'PPB', 'RAT_F',
                  'TDI', 'THROMBIN', 'OX2'] # , '3A4', 'LOGD'
@@ -144,7 +143,7 @@ def load_base_model(dataset_name):
     loaded_model_json = json_file.read()
     json_file.close()
     base_model_ = model_from_json(loaded_model_json)
-    base_model_.load_weights('./outputs/weights_' + dataset_name + '_' + str(feature_select_gen[dataset_name]) + '.h5')
+    # base_model_.load_weights('./outputs/weights_' + dataset_name + '_' + str(feature_select_gen[dataset_name]) + '.h5')
     # base_model_.summary()
 
     return base_model_
@@ -160,25 +159,25 @@ if __name__ == "__main__":
         data_train = ReadPandas(train_file, dropnan=True)
         Act_inx = data_train.dataframe.columns.get_loc('Act')
         feature_dim = data_train.dataframe.shape[1] - (Act_inx + 1)
-        print dataset_name + ' has ' + str(feature_dim) + ' features at start'
+        print dataset_name + ' has ' + str(feature_dim) + ' features'
 
         # split randomly train and val
         data_train, data_val = data_train >> SplitRandom(ratio=0.8) >> Collect()
         data_test = ReadPandas(test_file, dropnan=True)
 
-        feature_dim_orig = feature_dim
-        important_features = np.ones(shape=(feature_dim_orig,), dtype=np.uint8).tolist()
-
-        correlation_matrix = None
-        if DETERMINISTIC_SAMPLING:
-            fc = 10. ** ((np.log10(FINAL_FEATURE_DIM) - np.log10(feature_dim_orig)) / MAX_GENERATIONS)
-            sampling_type = 'deterministic'
-            if USE_CORRELATION:
-                data_train_ = ReadPandas(train_file, dropnan=True)
-                correlation_matrix = np.abs(data_train_.dataframe.ix[:, 2:].corr().values)
-        else:
-            fc = 0.8
-            sampling_type = 'importance'
+        # Load the best model from network evolve training (used all features)
+        feature_npy_name = './outputs/featureSelect_bm_' + dataset_name + '_' + str(1) + '_' + str(
+            5) + '.npy'
+        assert os.path.isfile(feature_npy_name)
+        selected_features = list(np.nonzero(np.load(feature_npy_name))[0])
+        feature_dim = len(selected_features)
+        base_model = load_base_model(dataset_name)
+        hidden_shape = {'dense_in': feature_dim, 'dense_1': 4000, 'dense_2': 2000, 'dense_3': 1000, 'dense_4': 1000}
+        for layer in base_model.layers:
+            if 'dense' in layer.name and 'out' not in layer.name:
+                hidden_shape[layer.name] = layer.get_config()['units']
+        del hidden_shape['dense_in']
+        print dataset_name + ' needs ' + str(feature_dim) + ' features'
 
         def organize_features(sample):
             """
@@ -188,8 +187,7 @@ if __name__ == "__main__":
             """
             y = [sample[Act_inx], ]
             features = list(sample[Act_inx + 1:])
-            used_features = np.nonzero(important_features)[0].tolist()
-            features = [features[i] for i in used_features]
+            features = [features[i] for i in selected_features]
             return (features, y)
 
 
@@ -217,85 +215,52 @@ if __name__ == "__main__":
         trues_val = data_val >> GetCols(Act_inx) >> Map(scale_activators) >> Collect()
         trues_test = data_test >> GetCols(Act_inx) >> Map(scale_activators) >> Collect()
         for rrun in range(0, N_RUNS):
-            # Load the best model from network evolve training (used all features)
-            base_model = load_base_model(dataset_name)
-            feature_dim = feature_dim_orig
-            important_features = np.ones(shape=(feature_dim_orig,), dtype=np.uint8).tolist()
 
-            hidden_shape = {'dense_1': 4000, 'dense_2': 2000, 'dense_3': 1000, 'dense_4': 1000}
-            for layer in base_model.layers:
-                if 'dense' in layer.name and 'out' not in layer.name:
-                    hidden_shape[layer.name] = layer.get_config()['units']
-
-            model, opti = initialize_model(feature_dim=feature_dim_orig, H_shape=hidden_shape)
-            # weight_mask = evolve.init_weight_mask_fs(model)
-            # make sure the input layer weight matrix has one synapse per neurone
-            # model = evolve.evolve_network_fs(model, weight_mask)
-            if LOAD_PRETRAIN_WEIGHTS:
-                evolve.load_weights_fs(model, base_model, important_features)
+            model, opti = initialize_model(feature_dim=feature_dim, H_shape=hidden_shape)
             model.compile(optimizer=opti, loss='mean_squared_error', metrics=[Rsqured])
             # model.summary()
 
-            for gen in range(0, MAX_GENERATIONS+1):
-                print 'Feature Selection dataset ' + dataset_name + ', generation: ' + str(gen)
+            # for gen in range(0, MAX_GENERATIONS+1):
+            print 'Feature Selection dataset ' + dataset_name + ', run: ' + str(rrun)
 
-                best_RMSE = float("inf")
-                for e in range(1, EPOCH + 1):
-                    # training the network
-                    data_train >> Shuffle(1000) >> Map(organize_features) >> NOP(PrintColType()) >> build_batch >> Map(
-                        train_network_batch) >> NOP(Print()) >> Consume()
+            best_RMSE = float("inf")
+            for e in range(1, EPOCH + 1):
+                # training the network
+                data_train >> Shuffle(1000) >> Map(organize_features) >> NOP(PrintColType()) >> build_batch >> Map(
+                    train_network_batch) >> NOP(Print()) >> Consume()
 
-                    # test the network every VAL_FREQ iteration
-                    if int(e) % VAL_FREQ == 0:
-                        preds = data_val >> Map(organize_features) >> build_batch >> Map(
-                            predict_network_batch) >> Flatten() >> Map(scale_activators) >> Collect()
+                # test the network every VAL_FREQ iteration
+                if int(e) % VAL_FREQ == 0:
+                    preds = data_val >> Map(organize_features) >> build_batch >> Map(
+                        predict_network_batch) >> Flatten() >> Map(scale_activators) >> Collect()
 
-                        RMSE_e = RMSE_np(preds, trues_val)
+                    RMSE_e = RMSE_np(preds, trues_val)
 
-                        if RMSE_e < best_RMSE:
-                            # print "model updated", e
-                            model_json = model.to_json()
-                            model.save_weights(
-                                './outputs/weights_' + dataset_name + '_' + 'temp1' + '.h5')
-                            best_RMSE = RMSE_e
+                    if RMSE_e < best_RMSE:
+                        model_json = model.to_json()
+                        model.save_weights(
+                            './outputs/weights_' + dataset_name + '_' + 'temp1' + '.h5')
+                        best_RMSE = RMSE_e
 
-                    # change leaning rate every 10-th epoch
-                    if int(e) % 10 == 0 and int(e) != 0:
-                        K.set_value(opti.lr, 0.5 * K.get_value(opti.lr))
+                # change leaning rate every 10-th epoch
+                if int(e) % 10 == 0:
+                    K.set_value(opti.lr, 0.5 * K.get_value(opti.lr))
 
-                # load best model
-                model.load_weights('./outputs/weights_' + dataset_name + '_' + 'temp1' + '.h5')
+            # load best model
+            model.load_weights('./outputs/weights_' + dataset_name + '_' + 'temp1' + '.h5')
 
-                print "Calculating errors for test set ..."
-                preds = data_test >> Map(organize_features) >> build_batch >> Map(
-                    predict_network_batch) >> Flatten() >> Map(
-                    scale_activators) >> Collect()
+            print "Calculating errors for test set ..."
+            preds = data_test >> Map(organize_features) >> build_batch >> Map(
+                predict_network_batch) >> Flatten() >> Map(
+                scale_activators) >> Collect()
 
-                RMSE_e = RMSE_np(preds, trues_test)
-                Rsquared_e = Rsqured_np(preds, trues_test)
-                print 'Dataset ' + dataset_name + ', Gen ' + str(gen) + ' Test : RMSE = ' + str(
-                    RMSE_e) + ', R-Squared = ' + str(Rsquared_e) + ', Features used = ' + str(feature_dim)
-                test_stat_hold.append(
-                    (rrun, gen, RMSE_e, Rsquared_e, best_RMSE ,feature_dim))
-                # Save the important features
-                np.save('./outputs/featureSelect_bm_' + dataset_name + '_' + str(rrun) + '_' + str(gen) + '.npy',
-                        important_features)
+            RMSE_e = RMSE_np(preds, trues_test)
+            Rsquared_e = Rsqured_np(preds, trues_test)
+            print 'Dataset ' + dataset_name + ', run ' + str(rrun) + ' Test : RMSE = ' + str(
+                RMSE_e) + ', R-Squared = ' + str(Rsquared_e)
+            test_stat_hold.append((rrun, RMSE_e, Rsquared_e))
 
-                # Select features for next generation
-                important_features = evolve.sample_weight_mask_fs(model, important_features, Fc=fc,
-                                                                         sampling_type=sampling_type, correlation_matrix=correlation_matrix)
-                if np.sum(important_features) < 1:
-                    print 'Stopping Evolution: number of used features is below 1'
-                    break
+            K.clear_session()
 
-                K.clear_session()
-                feature_dim = np.sum(important_features).astype(np.int)
-                model, opti = initialize_model(feature_dim=feature_dim, H_shape=hidden_shape)
-                # model = evolve.evolve_network_fs(model, important_features)
-                if LOAD_PRETRAIN_WEIGHTS:
-                    base_model = load_base_model(dataset_name)
-                    model = evolve.load_weights_fs(model, base_model, important_features)
-                model.compile(optimizer=opti, loss='mean_squared_error', metrics=[Rsqured])
-
-        writer = WriteCSV('./outputs/feature_selection_bm_' + dataset_name + '.csv')
+        writer = WriteCSV('./outputs/feature_selection_final_' + dataset_name + '.csv')
         test_stat_hold >> writer

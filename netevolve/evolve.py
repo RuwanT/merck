@@ -134,41 +134,56 @@ def sample_weight_mask(model, weight_mask, Fs=0.8, Fc=0.8, first_hidden='dense_1
     return weight_mask, H_shape
 
 
-def sample_weight_mask_fs(model, weight_mask, H_shape,  Fc=0.8, sampling_type='deterministic', in_layer_name='dense_in', first_hidden='dense_1'):
+def sample_weight_mask_fs(model, important_features, Fc=0.8, sampling_type='deterministic', first_hidden='dense_1', correlation_matrix=None):
     for layer in model.layers:
-        if in_layer_name in layer.name:
+        if first_hidden in layer.name:
+            used_features = np.nonzero(important_features)[0].tolist()
             if 'deterministic' in sampling_type:
-                weights = np.mean(np.abs(layer.get_weights()[0]), axis=0)
-                fc_percentile = np.percentile(weights, int((1. - Fc)*100.))
-                cluster_mask = (weights > fc_percentile).astype(np.int8)
+                if not correlation_matrix is None:
+                    m = len(used_features)
+                    weights = np.mean(np.abs(layer.get_weights()[0]), axis=1)
+                    num_features = int((1. - Fc) * m)
+                    cluster_mask = np.zeros(shape=(m,), dtype=np.int8)
+                    cluster_ids = range(0, m)
+                    for i in range(0, num_features):
+                        x = np.random.choice(cluster_ids, size=None, replace=False, p=weights[cluster_ids]/np.sum(weights[cluster_ids]))
+                        cluster_mask[x] = 1
+                        corr_vect = correlation_matrix[[used_features[i] for i in cluster_ids], used_features[x]]
+                        weights[cluster_ids] = weights[cluster_ids] * np.exp(-corr_vect)
+                        cluster_ids.remove(x)
+                        # weights[x] = 0
+                else:
+                    weights = np.mean(np.abs(layer.get_weights()[0]), axis=1)
+                    fc_percentile = np.percentile(weights, int((1. - Fc)*100.))
+                    cluster_mask = (weights > fc_percentile).astype(np.int8)
             elif 'importance' in sampling_type:
-                weights = np.mean(np.abs(layer.get_weights()[0]), axis=0)
+                # TODO : not changed to new sampling
+                weights = np.mean(np.abs(layer.get_weights()[0]), axis=1)
                 weights_ = normalize_cluster_weights(weights) * Fc
                 uniform_mat = np.random.random_sample(weights_.shape)
                 cluster_mask = (weights_ > uniform_mat).astype(np.int8)
 
             cols_to_delete = np.nonzero(np.logical_not(cluster_mask).astype(np.int8))
-            weight_mask = np.delete(weight_mask, cols_to_delete, axis=1)
-            H_shape[in_layer_name] = np.sum(cluster_mask)
+            used_features = np.delete(used_features, cols_to_delete)
+            important_features = np.zeros(shape=(len(important_features),), dtype=np.uint8)
+            important_features[used_features] = 1
 
-    return weight_mask, H_shape
+    return important_features
 
 
-def load_weights_fs(model, base_model, weight_mask, first_hidden='dense_1'):
-    selected_features = np.sum(weight_mask, axis=1).astype(np.int8)
-    rows_to_delete = np.nonzero(np.logical_not(selected_features).astype(np.int8))
+def load_weights_fs(model, base_model, important_features, first_hidden='dense_1'):
+    rows_to_delete = np.nonzero(np.logical_not(important_features).astype(np.int8))
 
     for layer in model.layers:
-        if 'dense' in layer.name and 'in' not in layer.name:
+        if 'dense' in layer.name:
             base_layer = base_model.get_layer(layer.name)
             if first_hidden in layer.name:
                 weights = base_layer.get_weights()
                 weights[0] = np.delete(weights[0], rows_to_delete, axis=0)
                 layer.set_weights(weights)
+                layer.trainable = True
             else:
                 layer.set_weights(base_layer.get_weights())
-            layer.trainable = False
-        if 'dense' in layer.name and 'in' in layer.name:
-            layer.trainable = True
+                layer.trainable = True
 
     return model

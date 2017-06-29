@@ -89,7 +89,7 @@ def print_res_of_gen(gen):
 
 def selected_feature_overalp():
     # Use average correlation to compare the features selected in different runs of the neural network
-    GEN = 9
+    GEN = 10
     NNRUN = 5
     np.set_printoptions(precision=3)
     res = list()
@@ -154,7 +154,8 @@ def plot_feature_selection():
         run_rmse = (np.asarray(run_rmse))
 
         ax1.boxplot(run_rmse)
-        ax2.plot(range(1, 10 + 1), np.mean(np.asarray(nfeatures), axis=0, keepdims=False), 'ro-')
+        ax2.plot(range(1, 10 + 2), np.mean(np.asarray(nfeatures), axis=0, keepdims=False), 'ro-')
+        ax2.text(10.5, np.asarray(nfeatures).flatten()[-1] + 10, '$n_f$ = ' + str(np.asarray(nfeatures).flatten()[-1]), verticalalignment='bottom', horizontalalignment='center', fontsize=15)
 
         ax1.set_ylim([0, np.max(run_rmse) * 1.1])
         ax1.set_xlabel('Generation')
@@ -163,7 +164,7 @@ def plot_feature_selection():
         ax2.set_ylim([0, np.max(nfeatures) * 1.1])
         ax2.set_ylabel('Number of Features', color='r')
         ax2.tick_params('y', colors='r')
-
+        ax1.axhline(y=np.mean(results_frame.loc[results_frame['gen'] == 0]['test_RMSE'].values), xmin=0.0, xmax=11 - 1, linewidth=1, color='k', linestyle='dashed')
         plt.pause(.1)
 
         fig.tight_layout()
@@ -223,6 +224,6 @@ if __name__ == "__main__":
     # plot_net_evolve()
     # print_res_of_gen(0)
     # selected_features()
-    # plot_feature_selection()
-    selected_feature_overalp()
+    plot_feature_selection()
+    # selected_feature_overalp()
     # plot_corr()
